@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>드라이브 영상 갤러리</title>
+<style>
+  :root {
+    --bg: #111317; --panel: #1b1e24; --line: #2a2e36; --text: #e8eaee; --dim: #9aa1ad;
+    --accent: #4c8dff; --accent-text: #fff; --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 8px 14px; border-radius: 10px; cursor: pointer; text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { border-color: var(--dim); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .5; cursor: default; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(17,19,23,.92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line); padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
+    display: flex; gap: 12px; align-items: center; }
+  header h1 { font-size: 17px; margin: 0; white-space: nowrap; }
+  #crumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; white-space: nowrap; color: var(--dim); }
+  #crumbs a { color: var(--dim); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+  #crumbs a:last-child { color: var(--text); font-weight: 600; }
+  #crumbs a:hover { background: var(--panel); }
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .notice { max-width: 560px; margin: 40px auto; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px; }
+  .notice h2 { margin-top: 0; font-size: 18px; }
+  .notice input { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; margin: 8px 0 12px; }
+  #status { color: var(--dim); text-align: center; padding: 24px 0; }
+  #status:empty { display: none; }
+  #status.error { color: var(--danger); }
+  #grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  @media (max-width: 520px) { #grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer;
+    text-align: left; padding: 0; display: block; width: 100%; }
+  .card:hover { border-color: var(--dim); }
+  .thumb { aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; position: relative; display: grid; place-items: center; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb .icon { font-size: 44px; }
+  .badge { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 12px;
+    padding: 1px 6px; border-radius: 6px; }
+  .badge.pin { left: 6px; right: auto; background: var(--accent); }
+  .name { padding: 8px 10px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text);
+    padding: 0; width: min(960px, 100vw - 16px); max-height: calc(100dvh - 16px); }
+  dialog::backdrop { background: rgba(0,0,0,.7); }
+  .v-head { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .v-head .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .v-body { padding: 12px; display: grid; gap: 10px; }
+  .frame { width: 100%; aspect-ratio: 16 / 9; border: 0; background: #000; border-radius: 8px; display: block; }
+  video.frame { max-height: 60dvh; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--dim); font-size: 13px; }
+  .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 영상 갤러리</h1>
+  <nav id="crumbs"></nav>
+  <button id="authBtn" hidden></button>
+</header>
+<main>
+  <section id="setup" class="notice" hidden>
+    <h2>처음 설정</h2>
+    <p class="hint">Google Cloud에서 발급받은 OAuth 클라이언트 ID를 붙여넣으세요. 이 브라우저에만 저장됩니다.</p>
+    <input id="clientIdInput" placeholder="xxxxxxxx.apps.googleusercontent.com" autocomplete="off">
+    <button class="primary" id="clientIdSave">저장</button>
+  </section>
+  <section id="login" class="notice" hidden>
+    <h2>구글 로그인</h2>
+    <p class="hint">내 드라이브 영상 목록을 읽고, 지정한 썸네일을 내 드라이브의 숨김 앱 폴더에 저장합니다. 영상 자체는 바뀌지 않습니다.</p>
+    <button class="primary" id="loginBtn">구글로 로그인</button>
+  </section>
+  <div id="status"></div>
+  <div id="grid"></div>
+</main>
+
+<dialog id="viewer">
+  <div class="v-head">
+    <div class="title" id="vTitle"></div>
+    <button id="vClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="v-body" id="vBody"></div>
+</dialog>
+
+<script>
+// Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
+const CLIENT_ID = '';
+const SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
+const DRIVE = 'https://www.googleapis.com/drive/v3';
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+const GALLERY_NAME = 'gallery.json';
+
+const $ = s => document.querySelector(s);
+function el(tag, props = {}, ...kids) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...kids.filter(k => k !== undefined && k !== null && k !== false));
+  return n;
+}
+function fmtTime(sec) {
+  sec = Math.max(0, sec);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = Math.floor(sec % 60);
+  const mmss = `${String(m).padStart(h ? 2 : 1, '0')}:${String(s).padStart(2, '0')}`;
+  return h ? `${h}:${mmss}` : mmss;
+}
+function fmtSize(bytes) {
+  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + 'GB' : Math.round(bytes / 1e6) + 'MB';
+}
+
+// ---------- 인증 ----------
+class AuthError extends Error {}
+let token = null, tokenExp = 0, tokenClient = null;
+
+function clientId() { return CLIENT_ID || localStorage.getItem('clientId') || ''; }
+
+function loadGis() {
+  return new Promise((resolve, reject) => {
+    const s = el('script', { src: 'https://accounts.google.com/gsi/client', onload: resolve, onerror: reject });
+    document.head.append(s);
+  });
+}
+
+function requestToken() {
+  return new Promise((resolve, reject) => {
+    tokenClient.callback = r => {
+      if (r.error) return reject(new Error(r.error_description || r.error));
+      token = r.access_token;
+      tokenExp = Date.now() + (r.expires_in - 60) * 1000;
+      sessionStorage.setItem('tok', JSON.stringify({ token, tokenExp }));
+      resolve();
+    };
+    tokenClient.error_callback = e => reject(new Error(e.message || e.type));
+    tokenClient.requestAccessToken({ prompt: '' });
+  });
+}
+
+function restoreToken() {
+  try {
+    const t = JSON.parse(sessionStorage.getItem('tok') || 'null');
+    if (t && t.tokenExp > Date.now()) ({ token, tokenExp } = t);
+  } catch {}
+}
+
+function showLoggedOut(msg) {
+  token = null;
+  sessionStorage.removeItem('tok');
+  $('#grid').replaceChildren();
+  $('#login').hidden = false;
+  $('#authBtn').hidden = true;
+  setStatus(msg || '');
+}
+
+async function api(url, opts = {}) {
+  if (!token || Date.now() > tokenExp) throw new AuthError('로그인이 만료됐어요. 다시 로그인해 주세요.');
+  const res = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  if (res.status === 401) throw new AuthError('로그인이 만료됐어요. 다시 로그인해 주세요.');
+  if (!res.ok) throw new Error(`드라이브 요청 실패 (${res.status})`);
+  return res;
+}
+
+// ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
+let gallery = { videos: {} }, galleryFileId = null;
+
+async function loadGallery() {
+  const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
+  const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
+  if (!files.length) { galleryFileId = null; gallery = { videos: {} }; return; }
+  galleryFileId = files[0].id;
+  gallery = await (await api(`${DRIVE}/files/${galleryFileId}?alt=media`)).json();
+  gallery.videos = gallery.videos || {};
+}
+
+// entry 가 없으면 해당 영상의 지정 썸네일 삭제
+async function saveEntry(fileId, entry) {
+  await loadGallery(); // 다른 기기에서 바뀐 내용을 덮어쓰지 않도록 최신본 위에 반영
+  if (entry) gallery.videos[fileId] = entry; else delete gallery.videos[fileId];
+  const body = JSON.stringify(gallery);
+  if (galleryFileId) {
+    await api(`${UPLOAD}/files/${galleryFileId}?uploadType=media`,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+  } else {
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({ name: GALLERY_NAME, parents: ['appDataFolder'] })], { type: 'application/json' }));
+    form.append('file', new Blob([body], { type: 'application/json' }));
+    galleryFileId = (await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', body: form })).json()).id;
+  }
+}
+
+// ---------- 폴더 탐색 ----------
+let path = [{ id: 'root', name: '내 드라이브' }];
+let items = [];
+try { const saved = JSON.parse(localStorage.getItem('path') || 'null'); if (Array.isArray(saved) && saved.length) path = saved; } catch {}
+
+async function listFolder(id) {
+  const q = `'${id}' in parents and trashed = false and (mimeType = 'application/vnd.google-apps.folder' or mimeType contains 'video/')`;
+  const fields = 'nextPageToken,files(id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis))';
+  const out = [];
+  let pageToken = '';
+  do {
+    const p = new URLSearchParams({ q, fields, pageSize: '1000', orderBy: 'folder,name' });
+    if (pageToken) p.set('pageToken', pageToken);
+    const data = await (await api(`${DRIVE}/files?${p}`)).json();
+    out.push(...data.files);
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+  return out;
+}
+
+function setStatus(msg, isError) {
+  const s = $('#status');
+  s.textContent = msg;
+  s.className = isError ? 'error' : '';
+}
+
+function renderCrumbs() {
+  $('#crumbs').replaceChildren(...path.flatMap((p, i) => [
+    i ? el('span', { textContent: '›' }) : null,
+    el('a', { textContent: p.name, onclick: () => { path = path.slice(0, i + 1); openFolder(); } }),
+  ]).filter(Boolean));
+}
+
+async function openFolder() {
+  localStorage.setItem('path', JSON.stringify(path));
+  renderCrumbs();
+  $('#grid').replaceChildren();
+  setStatus('불러오는 중…');
+  try {
+    items = await listFolder(path[path.length - 1].id);
+    setStatus(items.length ? '' : '이 폴더에는 영상이나 하위 폴더가 없어요.');
+    renderGrid();
+  } catch (e) { handleError(e); }
+}
+
+function renderGrid() {
+  $('#grid').replaceChildren(...items.map(f => f.mimeType === 'application/vnd.google-apps.folder' ? folderCard(f) : videoCard(f)));
+}
+
+function folderCard(f) {
+  return el('button', { className: 'card', onclick: () => { path.push({ id: f.id, name: f.name }); openFolder(); } },
+    el('div', { className: 'thumb' }, el('span', { className: 'icon', textContent: '📁' })),
+    el('div', { className: 'name', textContent: f.name, title: f.name }));
+}
+
+function videoCard(f) {
+  const custom = gallery.videos[f.id];
+  const thumb = el('div', { className: 'thumb' });
+  const src = custom ? custom.thumb : (f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s480') : '');
+  if (src) {
+    const img = el('img', { src, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
+    img.onerror = () => img.replaceWith(el('span', { className: 'icon', textContent: '🎞️' }));
+    thumb.append(img);
+  } else {
+    thumb.append(el('span', { className: 'icon', textContent: '🎞️' }));
+  }
+  if (custom) thumb.append(el('span', { className: 'badge pin', textContent: '📌 ' + fmtTime(custom.t) }));
+  const dur = f.videoMediaMetadata && +f.videoMediaMetadata.durationMillis;
+  if (dur) thumb.append(el('span', { className: 'badge', textContent: fmtTime(dur / 1000) }));
+  return el('button', { className: 'card', onclick: () => openViewer(f) },
+    thumb, el('div', { className: 'name', textContent: f.name, title: f.name }));
+}
+
+function handleError(e) {
+  if (e instanceof AuthError) showLoggedOut(e.message);
+  else setStatus(e.message || String(e), true);
+}
+
+// ---------- 재생 / 썸네일 지정 ----------
+const viewer = $('#viewer');
+let viewerAbort = null, viewerBlobUrl = null;
+
+function closeViewerResources() {
+  if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
+  if (viewerBlobUrl) { URL.revokeObjectURL(viewerBlobUrl); viewerBlobUrl = null; }
+  $('#vBody').replaceChildren();
+}
+viewer.addEventListener('close', closeViewerResources);
+$('#vClose').onclick = () => viewer.close();
+
+function openViewer(f) {
+  closeViewerResources();
+  $('#vTitle').textContent = f.name;
+  const custom = gallery.videos[f.id];
+  $('#vBody').replaceChildren(
+    el('iframe', { className: 'frame', src: `https://drive.google.com/file/d/${f.id}/preview`, allow: 'autoplay; fullscreen', allowFullscreen: true }),
+    el('div', { className: 'row' },
+      el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
+      el('button', { textContent: '🖼️ 장면으로 썸네일 지정', onclick: () => openEditor(f) }),
+      custom ? el('button', { textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
+    el('p', { className: 'hint', textContent: '여기서 재생이 안 되면 "드라이브에서 열기"를 눌러 주세요.' }));
+  viewer.showModal();
+}
+
+async function resetThumb(f) {
+  try { await saveEntry(f.id, null); renderGrid(); viewer.close(); } catch (e) { viewer.close(); handleError(e); }
+}
+
+async function openEditor(f) {
+  closeViewerResources();
+  const progress = el('div', { className: 'hint' });
+  const cancel = el('button', { textContent: '취소', onclick: () => viewer.close() });
+  $('#vBody').replaceChildren(progress, el('div', { className: 'row' }, cancel));
+  const size = +f.size || 0;
+  progress.textContent = `장면을 고르려면 영상을 내려받아야 해요${size ? ` (${fmtSize(size)})` : ''}. 받는 중… 0%`;
+  viewerAbort = new AbortController();
+  let blob;
+  try {
+    const res = await api(`${DRIVE}/files/${f.id}?alt=media`, { signal: viewerAbort.signal });
+    const reader = res.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      progress.textContent = size ? `받는 중… ${Math.floor(got / size * 100)}% (${fmtSize(got)} / ${fmtSize(size)})` : `받는 중… ${fmtSize(got)}`;
+    }
+    blob = new Blob(chunks, { type: f.mimeType });
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    viewer.close();
+    return handleError(e);
+  }
+  viewerAbort = null;
+  viewerBlobUrl = URL.createObjectURL(blob);
+  showPicker(f, viewerBlobUrl);
+}
+
+function showPicker(f, url) {
+  const video = el('video', { className: 'frame', src: url, controls: true, playsInline: true, preload: 'auto' });
+  const time = el('span', { className: 'time', textContent: '0:00' });
+  const msg = el('div', { className: 'hint', textContent: '원하는 장면에서 멈춘 뒤 "이 장면으로 지정"을 누르세요.' });
+  const saveBtn = el('button', { className: 'primary', textContent: '📌 이 장면으로 지정', disabled: true });
+  const step = d => () => { video.pause(); video.currentTime = Math.min(Math.max(0, video.currentTime + d), video.duration || 0); };
+  video.addEventListener('timeupdate', () => { time.textContent = fmtTime(video.currentTime) + '.' + Math.floor(video.currentTime % 1 * 10); });
+  video.addEventListener('seeked', () => video.dispatchEvent(new Event('timeupdate')));
+  video.addEventListener('loadeddata', () => {
+    saveBtn.disabled = false;
+    const prev = gallery.videos[f.id];
+    if (prev) video.currentTime = prev.t;
+  });
+  video.addEventListener('error', () => {
+    msg.textContent = '이 브라우저에서 재생할 수 없는 형식이에요(아이폰 HEVC 영상 등). 엣지나 사파리에서 시도해 보세요.';
+    msg.style.color = 'var(--danger)';
+  });
+  saveBtn.onclick = async () => {
+    saveBtn.disabled = true;
+    msg.textContent = '저장 중…';
+    try {
+      await saveEntry(f.id, { t: Math.round(video.currentTime * 10) / 10, thumb: capture(video), at: new Date().toISOString() });
+      renderGrid();
+      viewer.close();
+    } catch (e) {
+      viewer.close();
+      handleError(e);
+    }
+  };
+  $('#vBody').replaceChildren(video,
+    el('div', { className: 'row' },
+      el('button', { textContent: '-1초', onclick: step(-1) }),
+      el('button', { textContent: '-0.1', onclick: step(-0.1) }),
+      time,
+      el('button', { textContent: '+0.1', onclick: step(0.1) }),
+      el('button', { textContent: '+1초', onclick: step(1) }),
+      saveBtn),
+    msg);
+}
+
+// 현재 프레임을 가로 최대 640px JPEG(data URL)로
+function capture(video) {
+  const w = Math.min(640, video.videoWidth);
+  const h = Math.round(video.videoHeight * w / video.videoWidth);
+  const c = el('canvas', { width: w, height: h });
+  c.getContext('2d').drawImage(video, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', 0.8);
+}
+
+// ---------- 시작 ----------
+async function start() {
+  $('#login').hidden = true;
+  $('#authBtn').hidden = false;
+  setStatus('불러오는 중…');
+  try {
+    await loadGallery();
+    await openFolder();
+  } catch (e) { handleError(e); }
+}
+
+$('#authBtn').textContent = '로그아웃';
+$('#authBtn').onclick = () => showLoggedOut('로그아웃했어요.');
+$('#loginBtn').onclick = async () => {
+  try { await requestToken(); start(); } catch (e) { setStatus('로그인 실패: ' + e.message, true); }
+};
+$('#clientIdSave').onclick = () => {
+  const v = $('#clientIdInput').value.trim();
+  if (!v.endsWith('.apps.googleusercontent.com')) return setStatus('클라이언트 ID 형식이 아니에요.', true);
+  localStorage.setItem('clientId', v);
+  location.reload();
+};
+
+(async () => {
+  renderCrumbs();
+  if (!clientId()) { $('#setup').hidden = false; return; }
+  try { await loadGis(); } catch { return setStatus('구글 로그인 스크립트를 불러오지 못했어요.', true); }
+  tokenClient = google.accounts.oauth2.initTokenClient({ client_id: clientId(), scope: SCOPES, callback: () => {} });
+  restoreToken();
+  if (token) start(); else $('#login').hidden = false;
+})();
+</script>
+</body>
+</html>
