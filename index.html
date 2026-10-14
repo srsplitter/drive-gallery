@@ -59,8 +59,8 @@
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
   canvas.frame { object-fit: contain; max-height: 60dvh; }
-  .preview-box { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--accent); border-radius: 10px; }
-  canvas.preview { width: 100%; max-height: 40dvh; object-fit: contain; background: #000; border-radius: 6px; }
+  dialog.confirm { width: min(340px, 100vw - 32px); padding: 18px 20px; }
+  dialog.confirm p { margin: 0 0 14px; font-weight: 600; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
   .time-input { width: 96px; text-align: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
@@ -281,9 +281,13 @@ function handleError(e) {
 // ---------- 재생 / 썸네일 지정 ----------
 const viewer = $('#viewer');
 let viewerAbort = null;
+// "이 화면으로 바꿀까요?" 확인창 (영상 팝업 위에 겹쳐 뜸)
+const confirmDlg = el('dialog', { className: 'confirm' });
+document.body.append(confirmDlg);
 
 function closeViewerResources() {
   if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
+  if (confirmDlg.open) confirmDlg.close();
   // 스트리밍 중인 영상의 추가 다운로드 중단
   for (const v of $('#vBody').querySelectorAll('video')) { v.removeAttribute('src'); v.load(); }
   $('#vBody').replaceChildren();
@@ -321,10 +325,12 @@ function openViewer(f) {
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0]); };
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  const captureBtn = el('button', { className: 'primary', textContent: CAPTURE_LABEL });
+  captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
   $('#vBody').replaceChildren(
     iframe,
     el('div', { className: 'row' },
-      canCapture ? el('button', { className: 'primary', textContent: '📸 지금 화면으로 지정', onclick: () => captureFrame(f, iframe) }) : null,
+      canCapture ? captureBtn : null,
       el('button', { textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() }),
       el('button', { textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
@@ -332,31 +338,57 @@ function openViewer(f) {
     fileInput,
     el('div', { id: 'preview' }),
     el('p', { className: 'hint', textContent: canCapture
-      ? '원하는 장면에서 멈추고 "📸 지금 화면으로 지정" → 공유 창에서 이 탭을 고르면 플레이어 화면이 그대로 썸네일이 돼요. 직접 찍은 스크린샷을 여기에 붙여넣기(Ctrl+V)해도 돼요.'
+      ? '원하는 장면에서 멈추고 "📸 지금 화면으로 지정" → (처음 한 번) 공유 창에서 이 탭 선택 → 3초 안에 영상을 한 번 클릭해 아래 컨트롤을 숨기면 그 화면이 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요.'
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }));
   viewer.showModal();
 }
 
-// 이 탭 화면을 한 프레임 캡처해 플레이어(iframe) 영역만 잘라낸다
-async function captureFrame(f, iframe) {
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false,
-      preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude' });
-  } catch { return; } // 공유 창에서 취소
-  try {
+// 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
+// 다른 영상이나 다시 찍을 때 또 묻지 않는다 (사용자가 "공유 중지"를 누르면 다음에 다시 물음)
+const CAPTURE_LABEL = '📸 지금 화면으로 지정';
+let shareSession = null; // { stream, track, video }
+
+// 3초 뒤 이 탭 화면을 한 프레임 캡처해 플레이어(iframe) 영역만 잘라낸다.
+// 그사이 사용자가 영상을 한 번 클릭해 드라이브 플레이어의 하단 컨트롤을 숨긴다.
+async function captureFrame(f, iframe, btn) {
+  if (!shareSession) {
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false,
+        preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude' });
+    } catch { return; } // 공유 창에서 취소
     const [track] = stream.getVideoTracks();
-    let cropped = false;
-    if (window.CropTarget && track.cropTo) {
-      try { await track.cropTo(await CropTarget.fromElement(iframe)); cropped = true; } catch {}
-    }
-    if (!cropped && track.getSettings().displaySurface !== 'browser') {
+    if (track.getSettings().displaySurface !== 'browser') {
+      stream.getTracks().forEach(t => t.stop());
       return showPreviewMessage('공유 창에서 "이 탭"을 골라 주세요.');
     }
     const video = el('video', { muted: true, playsInline: true });
     video.srcObject = stream;
     await video.play();
-    await new Promise(r => setTimeout(r, 300)); // 자르기 반영 대기
+    shareSession = { stream, track, video };
+    // 브라우저의 "공유 중지"를 누르면 다음엔 다시 묻기
+    track.addEventListener('ended', () => { if (shareSession && shareSession.stream === stream) shareSession = null; });
+  }
+  // 지금 열린 영상의 플레이어 영역만 잘라 받기 (영상마다 iframe 이 새로 생기므로 매번 다시 지정)
+  let cropped = false;
+  if (window.CropTarget && shareSession.track.cropTo) {
+    try { await shareSession.track.cropTo(await CropTarget.fromElement(iframe)); cropped = true; } catch {
+      // 자르기는 이 탭을 공유할 때만 됨 → 다른 탭을 고른 것
+      shareSession.stream.getTracks().forEach(t => t.stop());
+      shareSession = null;
+      return showPreviewMessage('다른 탭이 공유됐어요. 📸를 다시 누르고 공유 창에서 "이 탭"을 골라 주세요.');
+    }
+  }
+  btn.disabled = true;
+  $('#preview').replaceChildren();
+  try {
+    // 카운트다운은 버튼 글자로만 표시 (영상을 클릭해야 하니 화면을 가리지 않음)
+    for (let s = 3; s > 0; s--) {
+      btn.textContent = `📸 ${s}초 뒤 찍어요 · 영상을 한 번 클릭해 컨트롤을 숨기세요`;
+      await new Promise(r => setTimeout(r, 1000));
+      if (!shareSession || !viewer.open) return; // 창을 닫았거나 공유 중지
+    }
+    const { video } = shareSession;
     let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
     if (!cropped) {
       const r = iframe.getBoundingClientRect(), k = video.videoWidth / window.innerWidth;
@@ -364,11 +396,12 @@ async function captureFrame(f, iframe) {
     }
     const c = el('canvas', { width: Math.round(sw), height: Math.round(sh) });
     c.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    showPreview(f, c);
+    askThumb(f, c);
   } catch (e) {
     showPreviewMessage('캡처하지 못했어요: ' + e.message);
   } finally {
-    stream.getTracks().forEach(t => t.stop());
+    btn.disabled = false;
+    btn.textContent = CAPTURE_LABEL;
   }
 }
 
@@ -379,7 +412,7 @@ async function previewImage(f, blob) {
     const c = el('canvas', { width: w, height: h });
     c.getContext('2d').drawImage(bmp, 0, 0, w, h);
     bmp.close();
-    showPreview(f, c);
+    askThumb(f, c);
   } catch { showPreviewMessage('이미지를 열지 못했어요.'); }
 }
 
@@ -387,22 +420,24 @@ function showPreviewMessage(text) {
   $('#preview').replaceChildren(el('p', { className: 'hint', textContent: text }));
 }
 
-function showPreview(f, canvas) {
-  canvas.className = 'preview';
-  const msg = el('span', { className: 'hint', textContent: '이 화면으로 지정할까요?' });
-  const saveBtn = el('button', { className: 'primary', textContent: '📌 지정' });
-  saveBtn.onclick = async () => {
-    saveBtn.disabled = true;
+// 영상 팝업 위에 작은 확인창만 띄운다 (미리보기 이미지는 보여주지 않음)
+function askThumb(f, canvas) {
+  const msg = el('p', { textContent: '이 화면으로 썸네일을 바꿀까요?' });
+  const ok = el('button', { className: 'primary', textContent: '바꾸기' });
+  const no = el('button', { textContent: '취소', onclick: () => confirmDlg.close() });
+  ok.onclick = async () => {
+    ok.disabled = no.disabled = true;
     msg.textContent = '저장 중…';
     try {
       await saveEntry(f.id, { t: null, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
       renderGrid();
+      confirmDlg.close();
       viewer.close();
-    } catch (e) { viewer.close(); handleError(e); }
+    } catch (e) { confirmDlg.close(); viewer.close(); handleError(e); }
   };
-  $('#preview').replaceChildren(el('div', { className: 'preview-box' }, canvas,
-    el('div', { className: 'row' }, saveBtn, el('button', { textContent: '취소', onclick: () => $('#preview').replaceChildren() }), msg)));
-  canvas.scrollIntoView({ block: 'nearest' });
+  confirmDlg.replaceChildren(msg, el('div', { className: 'row' }, ok, no));
+  if (!confirmDlg.open) confirmDlg.showModal();
+  ok.focus();
 }
 
 // 스크린샷 붙여넣기(Ctrl+V)
