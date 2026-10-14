@@ -10,13 +10,14 @@ window.addEventListener('message', (ev) => {
     return;
   }
 
-  if (d.type === 'capture' || d.type === 'player') {
+  if (d.type === 'capture' || d.type === 'player' || d.type === 'autoPause') {
     const reply = (res) => window.postMessage(Object.assign({ source: 'dgallery-ext', type: 'result', id: d.id, ok: false }, res), location.origin);
     try {
       chrome.runtime.sendMessage({
         type: d.type,
         action: typeof d.action === 'string' ? d.action : '',
-        delta: typeof d.delta === 'number' ? d.delta : 0
+        delta: typeof d.delta === 'number' ? d.delta : 0,
+        on: !!d.on
       }, (res) => {
         const err = chrome.runtime.lastError;
         reply(res || { error: err ? '확장과 연결에 실패했어요. 확장을 다시 로드해 주세요.' : '응답 없음' });

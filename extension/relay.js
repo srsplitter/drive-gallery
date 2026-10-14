@@ -4,8 +4,23 @@
 // 드라이브 플레이어가 어떤 주소의 하위 프레임에서 영상을 재생하든 찾도록, 탭의 모든 하위 프레임에 직접 실행한다.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tab = sender.tab;
-  // 갤러리 페이지(최상위 프레임)의 다리에서 온 요청만 처리
-  if (!tab || sender.frameId !== 0 || !String(sender.url || '').startsWith('https://srsplitter.github.io/drive-gallery/')) return;
+  if (!tab) return;
+  // 플레이어 프레임(autopause.js)이 로드될 때 이 탭의 자동 멈춤 상태를 물어봄
+  if (msg.type === 'autoPauseState') {
+    const key = 'ap' + tab.id;
+    chrome.storage.session.get(key).then((o) => sendResponse({ on: !!o[key] }), () => sendResponse({ on: false }));
+    return true;
+  }
+  // 그 밖에는 갤러리 페이지(최상위 프레임)의 다리에서 온 요청만 처리
+  if (sender.frameId !== 0 || !String(sender.url || '').startsWith('https://srsplitter.github.io/drive-gallery/')) return;
+
+  if (msg.type === 'autoPause') {
+    // 수정 ON/OFF → 이 탭의 플레이어 프레임들에 알리고, 나중에 로드될 프레임을 위해 저장
+    chrome.storage.session.set({ ['ap' + tab.id]: !!msg.on });
+    chrome.tabs.sendMessage(tab.id, { type: 'autoPause', on: !!msg.on }).catch(() => {});
+    sendResponse({ ok: true });
+    return;
+  }
 
   if (msg.type === 'capture') {
     capture(tab).then(sendResponse, (e) => sendResponse({ ok: false, error: '캡처 실패: ' + (e && e.message || e) }));
@@ -87,7 +102,8 @@ function framePlayer(action, delta) {
   const v = found.find((x) => x.offsetWidth > 0 && x.offsetHeight > 0) || found[0];
   if (!v) return { where, videos: 0 };
   if (action === 'toggle') {
-    if (v.paused) v.play().catch(() => {}); else v.pause();
+    // ⏯ 로 재생하는 건 자동 멈춤(autopause.js)에서 제외
+    if (v.paused) { window.__dgUserPlay = true; v.play().catch(() => {}); } else v.pause();
   } else if (action === 'seek') {
     v.pause();
     const end = Number.isFinite(v.duration) ? v.duration : Infinity;

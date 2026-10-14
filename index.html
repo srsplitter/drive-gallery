@@ -182,6 +182,12 @@ function setEditMode(on) {
   document.body.classList.toggle('editing', on);
   if (!on && restorePending) restorePending(); // 대기 중이던 [바꾸기] 취소
   renderEditBtn();
+  syncAutoPause();
+}
+
+// 확장에 수정 ON/OFF 를 알림 → ON 이면 영상을 클릭해 재생하는 순간 바로 멈춤 (⏯ 로 재생한 건 제외)
+function syncAutoPause() {
+  if (extReady) extCall('autoPause', { on: document.body.classList.contains('editing') }).catch(() => {});
 }
 
 // 확장 프로그램이 없으면 📸에 화면 공유 허용이 필요하다. 영상 창을 열기 전에 위쪽 수정 버튼에서 받아 두면
@@ -386,7 +392,7 @@ function openViewer(f) {
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     fileInput,
     el('div', { id: 'preview', className: 'edit-only' }),
-    el('p', { className: 'hint edit-only ext-only', textContent: '원하는 장면에 맞추고 "📸 지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
+    el('p', { className: 'hint edit-only ext-only', textContent: '영상을 클릭하면 불러온 뒤 바로 멈춰요(계속 보려면 ⏯). 시간선·버튼으로 장면을 맞추고 "📸 지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
     el('p', { className: 'hint edit-only no-ext-only', textContent: canCapture
       ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.'
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }));
@@ -912,7 +918,7 @@ const extWaiters = new Map();
 window.addEventListener('message', e => {
   if (e.source !== window || !e.data || e.data.source !== 'dgallery-ext') return;
   if (e.data.type === 'ready') {
-    if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); }
+    if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); syncAutoPause(); }
   } else if (e.data.type === 'result') {
     const done = extWaiters.get(e.data.id);
     if (done) { extWaiters.delete(e.data.id); done(e.data); }
