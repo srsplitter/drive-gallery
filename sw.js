@@ -1,4 +1,4 @@
-// 장면 지정용 부분 스트리밍.
+// 자체 플레이어용 부분 스트리밍.
 // <video src="stream/<파일ID>?size=..&type=.."> 의 Range 요청을 드라이브 API 로 중계한다(인증 헤더 추가).
 // 한 번에 최대 CHUNK 만큼만 받아오므로, 큰 영상도 보는/찾는 구간 근처만 내려받는다.
 const DRIVE = 'https://www.googleapis.com/drive/v3';
