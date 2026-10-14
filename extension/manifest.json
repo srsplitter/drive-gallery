@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "드라이브 영상 갤러리 도우미",
-  "version": "1.0",
+  "version": "1.1",
   "description": "드라이브 영상 갤러리에서 공유 허용 없이 플레이어 화면을 바로 캡처하고(컨트롤 자동 숨김), 재생·프레임 이동 버튼을 쓸 수 있게 합니다.",
   "background": { "service_worker": "relay.js" },
   "content_scripts": [
@@ -9,19 +9,8 @@
       "matches": ["https://srsplitter.github.io/drive-gallery/*"],
       "js": ["bridge.js"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://drive.google.com/*",
-        "https://youtube.googleapis.com/*",
-        "https://www.youtube.com/*",
-        "https://www.youtube-nocookie.com/*",
-        "https://*.googleusercontent.com/*"
-      ],
-      "js": ["player.js"],
-      "all_frames": true,
-      "run_at": "document_idle"
     }
   ],
+  "permissions": ["scripting"],
   "host_permissions": ["<all_urls>"]
 }

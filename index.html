@@ -362,13 +362,16 @@ function openViewer(f) {
   const imageBtn = el('button', { className: 'edit-only', textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
   viewerUI = { captureBtn, imageBtn };
   // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
+  const playerState = el('span', { className: 'time' }); // 조작 후 ⏸/▶ 와 현재 시간
   const pc = (label, action, delta) => el('button', { textContent: label,
-    onclick: () => extCall('player', { action, delta }).catch(e => showPreviewMessage(e.message)) });
+    onclick: () => extCall('player', { action, delta })
+      .then(r => { playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time); $('#preview').replaceChildren(); })
+      .catch(e => showPreviewMessage(e.message)) });
   $('#vBody').replaceChildren(
     iframe,
     el('div', { className: 'row edit-only ext-only' },
       pc('⏯ 재생/멈춤', 'toggle'), pc('-1초', 'seek', -1), pc('-1프레임', 'seek', -1 / 30),
-      pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1)),
+      pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1), playerState),
     el('div', { className: 'row' },
       canCapture ? captureBtn : null,
       imageBtn,
