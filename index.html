@@ -41,6 +41,11 @@
   .card:hover { border-color: var(--dim); }
   .thumb { aspect-ratio: 16 / 9; background: #000 center / cover no-repeat; position: relative; display: grid; place-items: center; }
   .thumb { overflow: hidden; }
+  body:not(.editing) .edit-only, body:not(.has-ext) .ext-only, body.has-ext .no-ext-only { display: none !important; }
+  .edit-wrap { position: relative; }
+  #editNote { position: absolute; right: 0; top: calc(100% + 8px); width: min(300px, 80vw); display: grid; gap: 8px;
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+  #editNote[hidden] { display: none; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
   .thumb .icon { font-size: 44px; }
   .badge { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 12px;
@@ -68,6 +73,7 @@
 <header>
   <h1>🎬 영상 갤러리</h1>
   <nav id="crumbs"></nav>
+  <span class="edit-wrap"><button id="editBtn" hidden></button><div id="editNote" hidden></div></span>
   <button id="authBtn" hidden></button>
 </header>
 <main>
@@ -159,7 +165,36 @@ function showLoggedOut(msg) {
   $('#grid').replaceChildren();
   $('#login').hidden = false;
   $('#authBtn').hidden = true;
+  $('#editBtn').hidden = true;
+  setEditMode(false);
   setStatus(msg || '');
+}
+
+// 수정 모드: ON 이면 영상 창에 썸네일 수정 버튼들이 보인다. 기본 OFF.
+// ON 은 이 탭을 닫거나 로그아웃할 때까지 유지 (새로고침해도 유지)
+function setEditMode(on) {
+  if (on) sessionStorage.setItem('editMode', '1'); else sessionStorage.removeItem('editMode');
+  document.body.classList.toggle('editing', on);
+  if (!on && restorePending) restorePending(); // 대기 중이던 [바꾸기] 취소
+  renderEditBtn();
+}
+
+// 확장 프로그램이 없으면 📸에 화면 공유 허용이 필요하다. 영상 창을 열기 전에 위쪽 수정 버튼에서 받아 두면
+// 크롬 허용 창(화면 위쪽)으로 마우스가 오갈 때 플레이어 위를 지나가지 않는다.
+function needsShare() {
+  return document.body.classList.contains('editing') && !extReady && !shareSession
+    && !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+}
+
+// 수정 버튼: OFF → (공유 허용 전) 🔓 허용 + 아래 안내 → ON
+function renderEditBtn(note) {
+  const on = document.body.classList.contains('editing'), ask = needsShare(), b = $('#editBtn');
+  b.textContent = ask ? '🔓 화면 캡처 허용' : on ? '✏️ 수정 ON' : '✏️ 수정 OFF';
+  b.className = on ? 'primary' : '';
+  $('#editNote').hidden = !ask || b.hidden;
+  if (ask) $('#editNote').replaceChildren(
+    el('div', { textContent: note || '📸 캡처를 위해 이 탭 화면 공유를 한 번 허용해 주세요. 위 버튼을 누르면 크롬 위쪽에 창이 떠요 → "이 탭" 확인 후 [공유]. 이 탭을 닫거나 새로고침하기 전까지 다시 묻지 않아요.' }),
+    el('button', { textContent: '수정 끄기', onclick: () => setEditMode(false) }));
 }
 
 async function api(url, opts = {}) {
@@ -321,22 +356,30 @@ function openViewer(f) {
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0], imageBtn); };
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-  const captureBtn = el('button', { className: 'primary', textContent: CAPTURE_LABEL });
+  // edit-only: 수정 모드(ON)에서만 보임
+  const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
-  const imageBtn = el('button', { textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
+  const imageBtn = el('button', { className: 'edit-only', textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
   viewerUI = { captureBtn, imageBtn };
+  // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
+  const pc = (label, action, delta) => el('button', { textContent: label,
+    onclick: () => extCall('player', { action, delta }).catch(e => showPreviewMessage(e.message)) });
   $('#vBody').replaceChildren(
     iframe,
+    el('div', { className: 'row edit-only ext-only' },
+      pc('⏯ 재생/멈춤', 'toggle'), pc('-1초', 'seek', -1), pc('-1프레임', 'seek', -1 / 30),
+      pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1)),
     el('div', { className: 'row' },
       canCapture ? captureBtn : null,
       imageBtn,
-      el('button', { textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
+      el('button', { className: 'edit-only', textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
-      custom ? el('button', { textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
+      custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     fileInput,
-    el('div', { id: 'preview' }),
-    el('p', { className: 'hint', textContent: canCapture
-      ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요 (처음 한 번은 공유 창에서 이 탭 선택). 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요.'
+    el('div', { id: 'preview', className: 'edit-only' }),
+    el('p', { className: 'hint edit-only ext-only', textContent: '원하는 장면에 맞추고 "📸 지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
+    el('p', { className: 'hint edit-only no-ext-only', textContent: canCapture
+      ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.'
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }));
   viewer.showModal();
 }
@@ -353,26 +396,56 @@ function playerRect(iframe, cropped, video) {
   return [r.left * k, r.top * k, r.width * k, r.height * k];
 }
 
+// 이 탭 화면 공유를 시작한다 (크롬 허용 창). 실패하면 이유 문자열, 성공하면 null
+async function startShare() {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false,
+      preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude' });
+  } catch { return '허용하지 않았어요.'; } // 공유 창에서 취소
+  const [track] = stream.getVideoTracks();
+  if (track.getSettings().displaySurface !== 'browser') {
+    stream.getTracks().forEach(t => t.stop());
+    return '공유 창에서 "이 탭"을 골라 주세요.';
+  }
+  const video = el('video', { muted: true, playsInline: true });
+  video.srcObject = stream;
+  await video.play();
+  shareSession = { stream, track, video };
+  // 브라우저의 "공유 중지"를 누르면 다음엔 다시 묻기
+  track.addEventListener('ended', () => {
+    if (shareSession && shareSession.stream === stream) { shareSession = null; renderEditBtn(); }
+  });
+  renderEditBtn();
+  return null;
+}
+
+// 확장 프로그램으로 캡처: 공유 허용 없이, 찍는 순간 플레이어 컨트롤을 숨기고 탭 화면을 찍어 플레이어 영역만 잘라냄
+async function captureViaExt(f, iframe, btn) {
+  btn.disabled = true;
+  $('#preview').replaceChildren();
+  try {
+    const { dataUrl } = await extCall('capture');
+    const img = await createImageBitmap(await (await fetch(dataUrl)).blob());
+    const r = iframe.getBoundingClientRect(), k = img.width / window.innerWidth;
+    const c = el('canvas', { width: Math.round(r.width * k), height: Math.round(r.height * k) });
+    c.getContext('2d').drawImage(img, r.left * k, r.top * k, r.width * k, r.height * k, 0, 0, c.width, c.height);
+    img.close();
+    askThumb(f, c, btn);
+  } catch (e) {
+    showPreviewMessage('캡처하지 못했어요: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // 📸 누름 → 바로 이 탭 화면을 한 프레임 캡처해 플레이어(iframe) 영역만 잘라낸다.
 async function captureFrame(f, iframe, btn) {
   if (btn.disabled) return;
+  if (extReady) return captureViaExt(f, iframe, btn);
   if (!shareSession) {
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: 'browser' }, audio: false,
-        preferCurrentTab: true, selfBrowserSurface: 'include', surfaceSwitching: 'exclude' });
-    } catch { return; } // 공유 창에서 취소
-    const [track] = stream.getVideoTracks();
-    if (track.getSettings().displaySurface !== 'browser') {
-      stream.getTracks().forEach(t => t.stop());
-      return showPreviewMessage('공유 창에서 "이 탭"을 골라 주세요.');
-    }
-    const video = el('video', { muted: true, playsInline: true });
-    video.srcObject = stream;
-    await video.play();
-    shareSession = { stream, track, video };
-    // 브라우저의 "공유 중지"를 누르면 다음엔 다시 묻기
-    track.addEventListener('ended', () => { if (shareSession && shareSession.stream === stream) shareSession = null; });
+    const why = await startShare();
+    if (why) return showPreviewMessage(why);
   }
   // 지금 열린 영상의 플레이어 영역만 잘라 받기. 영상마다 iframe 이 새로 생기므로 바뀌었을 때만 다시 지정
   let cropped = false;
@@ -382,6 +455,7 @@ async function captureFrame(f, iframe, btn) {
         // 자르기는 이 탭을 공유할 때만 됨 → 다른 탭을 고른 것
         shareSession.stream.getTracks().forEach(t => t.stop());
         shareSession = null;
+        renderEditBtn();
         return showPreviewMessage('다른 탭이 공유됐어요. 📸를 다시 누르고 공유 창에서 "이 탭"을 골라 주세요.');
       }
       shareSession.croppedTo = iframe;
@@ -435,7 +509,8 @@ function askThumb(f, canvas, btn) {
   };
   cancel.onclick = restorePending;
   btn.style.minWidth = btn.offsetWidth + 'px'; // 폭을 그대로 둬서 누른 자리에 [바꾸기]가 오게
-  Object.assign(btn, { textContent: '✅ 바꾸기', className: 'primary', disabled: false });
+  Object.assign(btn, { textContent: '✅ 바꾸기', disabled: false });
+  btn.classList.add('primary');
   btn.onclick = async () => {
     btn.disabled = cancel.disabled = true;
     btn.textContent = '저장 중…';
@@ -450,7 +525,7 @@ function askThumb(f, canvas, btn) {
 
 // 스크린샷 붙여넣기(Ctrl+V)
 document.addEventListener('paste', e => {
-  if (!viewer.open || !viewerFile || !$('#preview')) return;
+  if (!viewer.open || !viewerFile || !$('#preview') || !document.body.classList.contains('editing')) return;
   const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
   if (!item) return;
   e.preventDefault();
@@ -739,10 +814,35 @@ function capture(source, sw, sh) {
   return c.toDataURL('image/jpeg', 0.8);
 }
 
+// ---------- 확장 프로그램 (있으면 공유 허용 없이 캡처 + 플레이어 조작) ----------
+let extReady = false;
+const extWaiters = new Map();
+window.addEventListener('message', e => {
+  if (e.source !== window || !e.data || e.data.source !== 'dgallery-ext') return;
+  if (e.data.type === 'ready') {
+    if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); }
+  } else if (e.data.type === 'result') {
+    const done = extWaiters.get(e.data.id);
+    if (done) { extWaiters.delete(e.data.id); done(e.data); }
+  }
+});
+window.postMessage({ source: 'dgallery-page', type: 'ping' }, location.origin);
+
+function extCall(type, extra = {}) {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID();
+    const timer = setTimeout(() => { extWaiters.delete(id); reject(new Error('확장 프로그램이 응답하지 않아요.')); }, 5000);
+    extWaiters.set(id, res => { clearTimeout(timer); if (res.ok) resolve(res); else reject(new Error(res.error || '확장 프로그램 오류')); });
+    window.postMessage({ source: 'dgallery-page', type, id, ...extra }, location.origin);
+  });
+}
+
 // ---------- 시작 ----------
 async function start() {
   $('#login').hidden = true;
   $('#authBtn').hidden = false;
+  $('#editBtn').hidden = false;
+  renderEditBtn();
   setStatus('불러오는 중…');
   try {
     await loadGallery();
@@ -750,6 +850,14 @@ async function start() {
   } catch (e) { handleError(e); }
 }
 
+setEditMode(sessionStorage.getItem('editMode') === '1');
+$('#editBtn').onclick = async () => {
+  if (needsShare()) {
+    const why = await startShare();
+    return renderEditBtn(why ? why + ' 버튼을 다시 누르면 다시 물어요.' : undefined);
+  }
+  setEditMode(!document.body.classList.contains('editing'));
+};
 $('#authBtn').textContent = '로그아웃';
 $('#authBtn').onclick = () => showLoggedOut('로그아웃했어요.');
 $('#loginBtn').onclick = async () => {
