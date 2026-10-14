@@ -46,7 +46,12 @@
   #editNote { position: absolute; right: 0; top: calc(100% + 8px); width: min(300px, 80vw); display: grid; gap: 8px;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
   #editNote[hidden] { display: none; }
-  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .player-wrap { position: relative; }
+  .cropper { position: absolute; inset: 0; overflow: hidden; background: #000; border-radius: 8px; touch-action: none; }
+  .cropper canvas { position: absolute; }
+  .crop-box { position: absolute; box-sizing: border-box; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); cursor: move; }
+  .crop-box i { position: absolute; width: 14px; height: 14px; margin: -8px 0 0 -8px; background: #fff; border-radius: 3px; }
   .thumb .icon { font-size: 44px; }
   .badge { position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,.75); color: #fff; font-size: 12px;
     padding: 1px 6px; border-radius: 6px; }
@@ -360,7 +365,8 @@ function openViewer(f) {
   const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
   const imageBtn = el('button', { className: 'edit-only', textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
-  viewerUI = { captureBtn, imageBtn };
+  const playerWrap = el('div', { className: 'player-wrap' }, iframe); // 영역 조절기가 이 위에 겹쳐 뜸
+  viewerUI = { captureBtn, imageBtn, playerWrap };
   // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
   const playerState = el('span', { className: 'time' }); // 조작 후 ⏸/▶ 와 현재 시간
   const pc = (label, action, delta) => el('button', { textContent: label,
@@ -368,7 +374,7 @@ function openViewer(f) {
       .then(r => { playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time); $('#preview').replaceChildren(); })
       .catch(e => showPreviewMessage(e.message)) });
   $('#vBody').replaceChildren(
-    iframe,
+    playerWrap,
     el('div', { className: 'row edit-only ext-only' },
       pc('⏯ 재생/멈춤', 'toggle'), pc('-1초', 'seek', -1), pc('-1프레임', 'seek', -1 / 30),
       pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1), playerState),
@@ -498,16 +504,96 @@ function showPreviewMessage(text) {
   $('#preview').replaceChildren(el('p', { className: 'hint', textContent: text }));
 }
 
+// 영상 둘레의 검은 여백(세로 영상 양옆 등)을 뺀 실제 영상 영역 {x, y, w, h}. 못 찾으면 전체.
+function contentRect(canvas) {
+  const { width: W, height: H } = canvas;
+  const d = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+  const bright = (x, y) => { const i = (y * W + x) * 4; return d[i] + d[i + 1] + d[i + 2] > 60; };
+  // 한 줄(행/열)에서 밝은 점이 2% 넘게 있으면 영상이 있는 줄
+  const rowHas = y => { let n = 0, c = 0; for (let x = 0; x < W; x += 4) { c++; if (bright(x, y)) n++; } return n > c * 0.02; };
+  const colHas = x => { let n = 0, c = 0; for (let y = 0; y < H; y += 4) { c++; if (bright(x, y)) n++; } return n > c * 0.02; };
+  // 캡처 가장자리 1~2px 은 잘라낸 경계에 섞인 색이 남을 수 있어 건너뛰고 찾는다 (영상이 끝까지 차 있으면 다시 0까지)
+  const E = 2;
+  let top = E, bottom = H - 1 - E, left = E, right = W - 1 - E;
+  while (top < bottom && !rowHas(top)) top++;
+  while (bottom > top && !rowHas(bottom)) bottom--;
+  while (left < right && !colHas(left)) left++;
+  while (right > left && !colHas(right)) right--;
+  if (top === E) top = 0;
+  if (left === E) left = 0;
+  if (bottom === H - 1 - E) bottom = H - 1;
+  if (right === W - 1 - E) right = W - 1;
+  const r = { x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+  return r.w * r.h < W * H * 0.15 ? { x: 0, y: 0, w: W, h: H } : r; // 거의 다 검으면 전체
+}
+
+// 플레이어 자리에 찍힌 화면을 겹쳐 띄우고, 그 위에 끌어서 조절하는 영역 상자를 둔다.
+// 반환: { rect() 지금 상자(캔버스 픽셀 기준), remove() }
+function openCropper(canvas) {
+  const W = canvas.width, H = canvas.height;
+  const box = el('div', { className: 'crop-box' });
+  const dirs = { nw: [0, 0], n: [50, 0], ne: [100, 0], e: [100, 50], se: [100, 100], s: [50, 100], sw: [0, 100], w: [0, 50] };
+  for (const [dir, [x, y]] of Object.entries(dirs)) {
+    const h = el('i');
+    h.dataset.dir = dir;
+    Object.assign(h.style, { left: x + '%', top: y + '%', cursor: dir + '-resize' });
+    box.append(h);
+  }
+  const ov = el('div', { className: 'cropper' }, canvas, box);
+  viewerUI.playerWrap.append(ov);
+  let r = contentRect(canvas), scale = 1, ox = 0, oy = 0;
+  const render = () => {
+    scale = Math.min(ov.clientWidth / W, ov.clientHeight / H);
+    ox = (ov.clientWidth - W * scale) / 2;
+    oy = (ov.clientHeight - H * scale) / 2;
+    Object.assign(canvas.style, { left: ox + 'px', top: oy + 'px', width: W * scale + 'px', height: H * scale + 'px' });
+    Object.assign(box.style, { left: ox + r.x * scale + 'px', top: oy + r.y * scale + 'px', width: r.w * scale + 'px', height: r.h * scale + 'px' });
+  };
+  const ro = new ResizeObserver(render);
+  ro.observe(ov);
+  render();
+  box.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    box.setPointerCapture(e.pointerId);
+    const dir = e.target.dataset.dir || 'move', start = { ...r }, sx = e.clientX, sy = e.clientY, min = 16;
+    const onMove = ev => {
+      const dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
+      let { x, y, w, h } = start;
+      if (dir === 'move') {
+        x = Math.min(Math.max(0, x + dx), W - w);
+        y = Math.min(Math.max(0, y + dy), H - h);
+      } else {
+        if (dir.includes('w')) { const nx = Math.min(Math.max(0, x + dx), x + w - min); w += x - nx; x = nx; }
+        if (dir.includes('e')) w = Math.min(Math.max(min, w + dx), W - x);
+        if (dir.includes('n')) { const ny = Math.min(Math.max(0, y + dy), y + h - min); h += y - ny; y = ny; }
+        if (dir.includes('s')) h = Math.min(Math.max(min, h + dy), H - y);
+      }
+      r = { x, y, w, h };
+      render();
+    };
+    const onUp = () => { box.removeEventListener('pointermove', onMove); box.removeEventListener('pointerup', onUp); };
+    box.addEventListener('pointermove', onMove);
+    box.addEventListener('pointerup', onUp);
+  });
+  return {
+    rect: () => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }),
+    remove: () => { ro.disconnect(); ov.remove(); },
+  };
+}
+
 // 누른 버튼(📸 / 🖼️)이 그 자리에서 [바꾸기]로 바뀌고 옆에 [취소]가 생긴다 (마우스를 옮길 필요 없음)
+// 그동안 플레이어 자리에 영역 조절기가 뜨고, [바꾸기]를 누르면 그 영역만 썸네일로 저장
 let restorePending = null; // [바꾸기] 대기 중이면 원래 버튼으로 되돌리는 함수
 function askThumb(f, canvas, btn) {
   if (restorePending) restorePending();
   const { textContent: label, className, onclick } = btn;
   const cancel = el('button', { textContent: '취소' });
+  const cropper = openCropper(canvas);
   restorePending = () => {
     Object.assign(btn, { textContent: label, className, onclick, disabled: false });
     btn.style.minWidth = '';
     cancel.remove();
+    cropper.remove();
     restorePending = null;
   };
   cancel.onclick = restorePending;
@@ -518,7 +604,10 @@ function askThumb(f, canvas, btn) {
     btn.disabled = cancel.disabled = true;
     btn.textContent = '저장 중…';
     try {
-      await saveEntry(f.id, { t: null, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
+      const r = cropper.rect();
+      const out = el('canvas', { width: r.w, height: r.h });
+      out.getContext('2d').drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+      await saveEntry(f.id, { t: null, thumb: capture(out, r.w, r.h), at: new Date().toISOString() });
       renderGrid();
       viewer.close();
     } catch (e) { viewer.close(); handleError(e); }
@@ -808,10 +897,10 @@ function showPicker(f, url) {
     msg);
 }
 
-// 영상/캔버스의 현재 화면을 가로 최대 640px JPEG(data URL)로
+// 영상/캔버스의 현재 화면을 긴 변 최대 640px JPEG(data URL)로 (비율 유지)
 function capture(source, sw, sh) {
-  const w = Math.min(640, sw);
-  const h = Math.round(sh * w / sw);
+  const k = Math.min(1, 640 / Math.max(sw, sh));
+  const w = Math.round(sw * k), h = Math.round(sh * k);
   const c = el('canvas', { width: w, height: h });
   c.getContext('2d').drawImage(source, 0, 0, w, h);
   return c.toDataURL('image/jpeg', 0.8);
