@@ -59,8 +59,6 @@
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
   canvas.frame { object-fit: contain; max-height: 60dvh; }
-  dialog.confirm { width: min(340px, 100vw - 32px); padding: 18px 20px; }
-  dialog.confirm p { margin: 0 0 14px; font-weight: 600; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
   .time-input { width: 96px; text-align: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
@@ -281,13 +279,11 @@ function handleError(e) {
 // ---------- 재생 / 썸네일 지정 ----------
 const viewer = $('#viewer');
 let viewerAbort = null;
-// "이 화면으로 바꿀까요?" 확인창 (영상 팝업 위에 겹쳐 뜸)
-const confirmDlg = el('dialog', { className: 'confirm' });
-document.body.append(confirmDlg);
+let viewerUI = null; // 지금 열린 영상 창의 { captureBtn, imageBtn }
 
 function closeViewerResources() {
   if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
-  if (confirmDlg.open) confirmDlg.close();
+  restorePending = null;
   // 스트리밍 중인 영상의 추가 다운로드 중단
   for (const v of $('#vBody').querySelectorAll('video')) { v.removeAttribute('src'); v.load(); }
   $('#vBody').replaceChildren();
@@ -323,15 +319,17 @@ function openViewer(f) {
   const custom = gallery.videos[f.id];
   const iframe = el('iframe', { className: 'frame', src: `https://drive.google.com/file/d/${f.id}/preview`, allow: 'autoplay; fullscreen', allowFullscreen: true });
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
-  fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0]); };
+  fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0], imageBtn); };
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   const captureBtn = el('button', { className: 'primary', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
+  const imageBtn = el('button', { textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
+  viewerUI = { captureBtn, imageBtn };
   $('#vBody').replaceChildren(
     iframe,
     el('div', { className: 'row' },
       canCapture ? captureBtn : null,
-      el('button', { textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() }),
+      imageBtn,
       el('button', { textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
@@ -400,7 +398,7 @@ async function captureFrame(f, iframe, btn) {
     const [sx, sy, sw, sh] = playerRect(iframe, cropped, video);
     const c = el('canvas', { width: Math.round(sw), height: Math.round(sh) });
     c.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
-    askThumb(f, c);
+    askThumb(f, c, btn);
   } catch (e) {
     showPreviewMessage('캡처하지 못했어요: ' + e.message);
   } finally {
@@ -408,14 +406,14 @@ async function captureFrame(f, iframe, btn) {
   }
 }
 
-async function previewImage(f, blob) {
+async function previewImage(f, blob, btn) {
   try {
     const bmp = await createImageBitmap(blob);
     const w = Math.min(1280, bmp.width), h = Math.round(bmp.height * w / bmp.width);
     const c = el('canvas', { width: w, height: h });
     c.getContext('2d').drawImage(bmp, 0, 0, w, h);
     bmp.close();
-    askThumb(f, c);
+    askThumb(f, c, btn);
   } catch { showPreviewMessage('이미지를 열지 못했어요.'); }
 }
 
@@ -423,24 +421,31 @@ function showPreviewMessage(text) {
   $('#preview').replaceChildren(el('p', { className: 'hint', textContent: text }));
 }
 
-// 영상 팝업 위에 작은 확인창만 띄운다 (미리보기 이미지는 보여주지 않음)
-function askThumb(f, canvas) {
-  const msg = el('p', { textContent: '이 화면으로 썸네일을 바꿀까요?' });
-  const ok = el('button', { className: 'primary', textContent: '바꾸기' });
-  const no = el('button', { textContent: '취소', onclick: () => confirmDlg.close() });
-  ok.onclick = async () => {
-    ok.disabled = no.disabled = true;
-    msg.textContent = '저장 중…';
+// 누른 버튼(📸 / 🖼️)이 그 자리에서 [바꾸기]로 바뀌고 옆에 [취소]가 생긴다 (마우스를 옮길 필요 없음)
+let restorePending = null; // [바꾸기] 대기 중이면 원래 버튼으로 되돌리는 함수
+function askThumb(f, canvas, btn) {
+  if (restorePending) restorePending();
+  const { textContent: label, className, onclick } = btn;
+  const cancel = el('button', { textContent: '취소' });
+  restorePending = () => {
+    Object.assign(btn, { textContent: label, className, onclick, disabled: false });
+    btn.style.minWidth = '';
+    cancel.remove();
+    restorePending = null;
+  };
+  cancel.onclick = restorePending;
+  btn.style.minWidth = btn.offsetWidth + 'px'; // 폭을 그대로 둬서 누른 자리에 [바꾸기]가 오게
+  Object.assign(btn, { textContent: '✅ 바꾸기', className: 'primary', disabled: false });
+  btn.onclick = async () => {
+    btn.disabled = cancel.disabled = true;
+    btn.textContent = '저장 중…';
     try {
       await saveEntry(f.id, { t: null, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
       renderGrid();
-      confirmDlg.close();
       viewer.close();
-    } catch (e) { confirmDlg.close(); viewer.close(); handleError(e); }
+    } catch (e) { viewer.close(); handleError(e); }
   };
-  confirmDlg.replaceChildren(msg, el('div', { className: 'row' }, ok, no));
-  if (!confirmDlg.open) confirmDlg.showModal();
-  ok.focus();
+  btn.after(cancel);
 }
 
 // 스크린샷 붙여넣기(Ctrl+V)
@@ -449,7 +454,8 @@ document.addEventListener('paste', e => {
   const item = [...e.clipboardData.items].find(i => i.type.startsWith('image/'));
   if (!item) return;
   e.preventDefault();
-  previewImage(viewerFile, item.getAsFile());
+  const { captureBtn, imageBtn } = viewerUI;
+  previewImage(viewerFile, item.getAsFile(), captureBtn.isConnected ? captureBtn : imageBtn);
 });
 
 async function resetThumb(f) {
