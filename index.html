@@ -57,6 +57,10 @@
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
+  canvas.frame { object-fit: contain; max-height: 60dvh; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .time-input { width: 96px; text-align: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -150,6 +154,7 @@ function restoreToken() {
 function showLoggedOut(msg) {
   token = null;
   sessionStorage.removeItem('tok');
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({});
   $('#grid').replaceChildren();
   $('#login').hidden = false;
   $('#authBtn').hidden = true;
@@ -272,12 +277,31 @@ function handleError(e) {
 
 // ---------- 재생 / 썸네일 지정 ----------
 const viewer = $('#viewer');
-let viewerAbort = null, viewerBlobUrl = null;
+let viewerAbort = null;
 
 function closeViewerResources() {
   if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
-  if (viewerBlobUrl) { URL.revokeObjectURL(viewerBlobUrl); viewerBlobUrl = null; }
+  // 스트리밍 중인 영상의 추가 다운로드 중단
+  for (const v of $('#vBody').querySelectorAll('video')) { v.removeAttribute('src'); v.load(); }
   $('#vBody').replaceChildren();
+}
+
+// 서비스 워커(sw.js)를 준비하고 현재 토큰을 넘긴다. 쓸 수 없으면 false.
+async function streamReady() {
+  if (!('serviceWorker' in navigator) || !token) return false;
+  try {
+    await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await Promise.race([
+        new Promise(r => navigator.serviceWorker.addEventListener('controllerchange', r, { once: true })),
+        new Promise(r => setTimeout(r, 3000)),
+      ]);
+    }
+    if (!navigator.serviceWorker.controller) return false;
+    navigator.serviceWorker.controller.postMessage({ token, exp: tokenExp });
+    return true;
+  } catch { return false; }
 }
 viewer.addEventListener('close', closeViewerResources);
 $('#vClose').onclick = () => viewer.close();
@@ -300,45 +324,235 @@ async function resetThumb(f) {
   try { await saveEntry(f.id, null); renderGrid(); viewer.close(); } catch (e) { viewer.close(); handleError(e); }
 }
 
+// ---------- 장면 지정 ----------
+// MP4/MOV: 파일 색인(moov)과, 고른 시점이 속한 구간(키프레임~다음 키프레임)만 받아 그 프레임 하나만 디코딩한다.
+// 그 외 형식이나 미지원 브라우저: 서비스 워커 스트리밍으로 <video> 탐색.
+const MP4BOX_SRC = 'https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js';
+const MP4BOX_SRI = 'sha384-9oK16t6TCKqCB5OpB/LwRkNa48prlRFQPTYw8tb9uj699JvQ1wjxIq7YO8Z4hn3a';
+let mp4boxLoading = null;
+function loadMp4box() {
+  return mp4boxLoading = mp4boxLoading || new Promise((resolve, reject) => {
+    document.head.append(el('script', { src: MP4BOX_SRC, integrity: MP4BOX_SRI, crossOrigin: 'anonymous', onload: resolve,
+      onerror: () => { mp4boxLoading = null; reject(new Error('mp4box 로드 실패')); } }));
+  });
+}
+
 async function openEditor(f) {
   closeViewerResources();
-  const progress = el('div', { className: 'hint' });
-  const cancel = el('button', { textContent: '취소', onclick: () => viewer.close() });
-  $('#vBody').replaceChildren(progress, el('div', { className: 'row' }, cancel));
   const size = +f.size || 0;
-  progress.textContent = `장면을 고르려면 영상을 내려받아야 해요${size ? ` (${fmtSize(size)})` : ''}. 받는 중… 0%`;
+  const msg = el('div', { className: 'hint', textContent: '영상 정보를 읽는 중…' });
+  $('#vBody').replaceChildren(msg);
   viewerAbort = new AbortController();
-  let blob;
+  const signal = viewerAbort.signal;
   try {
-    const res = await api(`${DRIVE}/files/${f.id}?alt=media`, { signal: viewerAbort.signal });
-    const reader = res.body.getReader();
-    const chunks = [];
-    let got = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      got += value.length;
-      progress.textContent = size ? `받는 중… ${Math.floor(got / size * 100)}% (${fmtSize(got)} / ${fmtSize(size)})` : `받는 중… ${fmtSize(got)}`;
+    if (size && 'VideoDecoder' in window && /mp4|quicktime|m4v|3gpp/.test(f.mimeType)) {
+      const src = await openMp4(f.id, size, signal);
+      if (src) return showFramePicker(f, src);
     }
-    blob = new Blob(chunks, { type: f.mimeType });
   } catch (e) {
-    if (e.name === 'AbortError') return;
-    viewer.close();
-    return handleError(e);
+    if (signal.aborted) return;
+    if (e instanceof AuthError) { viewer.close(); return handleError(e); }
+    console.warn('프레임 추출 불가, 스트리밍으로 전환:', e);
   }
-  viewerAbort = null;
-  viewerBlobUrl = URL.createObjectURL(blob);
-  showPicker(f, viewerBlobUrl);
+  if (signal.aborted) return;
+  if (size && await streamReady()) {
+    return showPicker(f, `stream/${f.id}?size=${size}&type=${encodeURIComponent(f.mimeType)}`);
+  }
+  msg.textContent = '이 브라우저나 영상 형식에서는 장면 지정을 할 수 없어요. PC 크롬이나 엣지에서 시도해 주세요.';
+}
+
+async function rangeBuf(id, start, end, signal) {
+  const res = await api(`${DRIVE}/files/${id}?alt=media`, { headers: { Range: `bytes=${start}-${end}` }, signal });
+  if (res.status !== 206) { if (res.body) res.body.cancel(); throw new Error('부분 다운로드를 지원하지 않는 응답'); }
+  return res.arrayBuffer();
+}
+
+// 최상위 박스 헤더만 훑어 ftyp(파일 형식)와 moov(색인)만 받아 이어 붙인다. mdat(영상 데이터)는 건너뜀.
+async function findMoov(id, size, signal) {
+  let pos = 0, ftyp = null;
+  while (pos + 8 <= size) {
+    const head = new DataView(await rangeBuf(id, pos, Math.min(pos + 15, size - 1), signal));
+    const type = String.fromCharCode(head.getUint8(4), head.getUint8(5), head.getUint8(6), head.getUint8(7));
+    let len = head.getUint32(0);
+    if (len === 1) len = Number(head.getBigUint64(8));
+    else if (len === 0) len = size - pos;
+    if (len < 8) break;
+    if (type === 'ftyp') ftyp = await rangeBuf(id, pos, pos + len - 1, signal);
+    if (type === 'moov') {
+      const moov = await rangeBuf(id, pos, pos + len - 1, signal);
+      // 옛 QuickTime(.mov)은 ftyp 가 없을 수 있어 최소 형태로 채움 (mp4box 가 요구)
+      if (!ftyp) ftyp = new Uint8Array([0, 0, 0, 20, ...'ftypqt  ', 0, 0, 0, 0, ...'qt  '].map(c => typeof c === 'string' ? c.charCodeAt(0) : c)).buffer;
+      const out = new Uint8Array(ftyp.byteLength + moov.byteLength);
+      out.set(new Uint8Array(ftyp), 0);
+      out.set(new Uint8Array(moov), ftyp.byteLength);
+      return out.buffer;
+    }
+    pos += len;
+  }
+  throw new Error('영상 색인(moov)을 찾지 못했어요');
+}
+
+function decoderDescription(trak) {
+  for (const entry of trak.mdia.minf.stbl.stsd.entries) {
+    const box = entry.avcC || entry.hvcC || entry.vpcC || entry.av1C;
+    if (box) {
+      const s = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+      box.write(s);
+      return new Uint8Array(s.buffer, 8); // 박스 헤더 8바이트 제외
+    }
+  }
+}
+
+async function openMp4(id, size, signal) {
+  await loadMp4box();
+  const moov = await findMoov(id, size, signal);
+  const mp4 = MP4Box.createFile();
+  let info = null;
+  mp4.onReady = i => { info = i; };
+  moov.fileStart = 0; // 색인만 따로 파싱 (샘플 위치는 파일 절대 오프셋이라 영향 없음)
+  mp4.appendBuffer(moov);
+  mp4.flush();
+  const track = info && info.videoTracks[0];
+  if (!track) return null;
+  const trak = mp4.getTrackById(track.id);
+  const config = { codec: track.codec, codedWidth: track.video.width, codedHeight: track.video.height, description: decoderDescription(trak) };
+  if (!(await VideoDecoder.isConfigSupported(config)).supported) return null;
+  const m = track.matrix; // 폰 세로 영상 등의 회전 정보
+  const rotation = (Math.round(Math.atan2(m[1], m[0]) * 180 / Math.PI) + 360) % 360;
+  return { id, config, rotation, samples: trak.samples, timescale: track.timescale,
+    duration: info.duration / info.timescale, cache: new Map() };
+}
+
+// t초에 보이는 프레임을 디코딩해 { frame(VideoFrame), t(실제 프레임 시각) } 반환
+async function extractFrame(src, t, signal) {
+  const { samples, timescale } = src;
+  const want = t * timescale;
+  let target = 0;
+  for (let i = 0; i < samples.length; i++) {
+    if (samples[i].cts <= want && samples[i].cts >= samples[target].cts) target = i;
+  }
+  let key = target;
+  while (key > 0 && !samples[key].is_sync) key--;
+  let next = target + 1;
+  while (next < samples.length && !samples[next].is_sync) next++;
+  // 키프레임~다음 키프레임 직전(한 구간)을 한 번에 받아 두고, 같은 구간 안 미세 이동은 재사용
+  let gop = src.cache.get(key);
+  if (!gop) {
+    let lo = Infinity, hi = 0;
+    for (let i = key; i < next; i++) { lo = Math.min(lo, samples[i].offset); hi = Math.max(hi, samples[i].offset + samples[i].size); }
+    gop = { lo, buf: await rangeBuf(src.id, lo, hi - 1, signal) };
+    src.cache.set(key, gop);
+    if (src.cache.size > 3) src.cache.delete(src.cache.keys().next().value);
+  }
+  const us = v => Math.round(v * 1e6 / timescale);
+  const wantTs = us(samples[target].cts);
+  let best = null;
+  const decoder = new VideoDecoder({
+    output: frame => { if (frame.timestamp === wantTs) { if (best) best.close(); best = frame; } else frame.close(); },
+    error: () => {},
+  });
+  decoder.configure(src.config);
+  for (let i = key; i <= target; i++) {
+    const s = samples[i];
+    decoder.decode(new EncodedVideoChunk({
+      type: s.is_sync ? 'key' : 'delta', timestamp: us(s.cts), duration: us(s.duration),
+      data: new Uint8Array(gop.buf, s.offset - gop.lo, s.size),
+    }));
+  }
+  await decoder.flush();
+  decoder.close();
+  if (!best) throw new Error('프레임을 디코딩하지 못했어요');
+  return { frame: best, t: samples[target].cts / timescale };
+}
+
+function drawFrame(canvas, frame, rotation) {
+  const w = frame.displayWidth, h = frame.displayHeight, swap = rotation % 180 !== 0;
+  canvas.width = swap ? h : w;
+  canvas.height = swap ? w : h;
+  const g = canvas.getContext('2d');
+  g.translate(canvas.width / 2, canvas.height / 2);
+  g.rotate(rotation * Math.PI / 180);
+  g.drawImage(frame, -w / 2, -h / 2, w, h);
+}
+
+function fmtTenth(t) { const d = Math.round(t * 10); return fmtTime(Math.floor(d / 10)) + '.' + (d % 10); }
+function parseTime(str) {
+  const v = str.trim().split(':').reduce((acc, part) => acc * 60 + parseFloat(part), 0);
+  return Number.isFinite(v) ? v : null;
+}
+
+function showFramePicker(f, src) {
+  const signal = viewerAbort.signal;
+  const prev = gallery.videos[f.id];
+  let cur = Math.min(prev ? prev.t : 0, src.duration), shownT = null, busy = false, pending = false, timer = null;
+  const canvas = el('canvas', { className: 'frame' });
+  const slider = el('input', { type: 'range', min: 0, max: src.duration, step: 0.1, value: cur });
+  const timeInput = el('input', { className: 'time-input', value: fmtTenth(cur), inputMode: 'decimal' });
+  const msg = el('div', { className: 'hint' });
+  const saveBtn = el('button', { className: 'primary', textContent: '📌 이 장면으로 지정', disabled: true });
+
+  async function render() {
+    if (busy) { pending = true; return; }
+    busy = true;
+    saveBtn.disabled = true;
+    msg.textContent = '장면 가져오는 중…';
+    try {
+      do {
+        pending = false;
+        const r = await extractFrame(src, cur, signal);
+        drawFrame(canvas, r.frame, src.rotation);
+        r.frame.close();
+        shownT = r.t;
+      } while (pending);
+      msg.textContent = `${fmtTenth(shownT)} 장면이에요. 마음에 들면 지정하세요.`;
+      saveBtn.disabled = false;
+    } catch (e) {
+      if (signal.aborted) return;
+      if (e instanceof AuthError) { viewer.close(); return handleError(e); }
+      msg.textContent = '장면을 가져오지 못했어요: ' + e.message;
+    } finally { busy = false; }
+  }
+  function setTime(t, immediate) {
+    cur = Math.min(Math.max(0, t), src.duration);
+    slider.value = cur;
+    timeInput.value = fmtTenth(cur);
+    clearTimeout(timer);
+    timer = setTimeout(render, immediate ? 0 : 250);
+  }
+  slider.oninput = () => setTime(+slider.value);
+  timeInput.onchange = () => { const t = parseTime(timeInput.value); if (t !== null) setTime(t, true); };
+  const step = d => () => setTime(cur + d, true);
+  saveBtn.onclick = async () => {
+    saveBtn.disabled = true;
+    msg.textContent = '저장 중…';
+    try {
+      await saveEntry(f.id, { t: Math.round(shownT * 10) / 10, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
+      renderGrid();
+      viewer.close();
+    } catch (e) { viewer.close(); handleError(e); }
+  };
+  $('#vBody').replaceChildren(canvas, slider,
+    el('div', { className: 'row' },
+      el('button', { textContent: '-1초', onclick: step(-1) }),
+      el('button', { textContent: '-0.1', onclick: step(-0.1) }),
+      timeInput,
+      el('button', { textContent: '+0.1', onclick: step(0.1) }),
+      el('button', { textContent: '+1초', onclick: step(1) })),
+    el('div', { className: 'row' },
+      el('button', { textContent: '← 재생 화면', onclick: () => openViewer(f) }),
+      saveBtn),
+    msg,
+    el('p', { className: 'hint', textContent: '재생 화면(드라이브 플레이어)에서 원하는 장면의 시간을 확인해 입력하면 빨라요. 영상 전체가 아니라 그 장면 근처만 받아와요.' }));
+  setTime(cur, true);
 }
 
 function showPicker(f, url) {
-  const video = el('video', { className: 'frame', src: url, controls: true, playsInline: true, preload: 'auto' });
+  const video = el('video', { className: 'frame', src: url, controls: true, playsInline: true, preload: 'metadata' });
   const time = el('span', { className: 'time', textContent: '0:00' });
   const msg = el('div', { className: 'hint', textContent: '원하는 장면에서 멈춘 뒤 "이 장면으로 지정"을 누르세요.' });
   const saveBtn = el('button', { className: 'primary', textContent: '📌 이 장면으로 지정', disabled: true });
   const step = d => () => { video.pause(); video.currentTime = Math.min(Math.max(0, video.currentTime + d), video.duration || 0); };
-  video.addEventListener('timeupdate', () => { time.textContent = fmtTime(video.currentTime) + '.' + Math.floor(video.currentTime % 1 * 10); });
+  video.addEventListener('timeupdate', () => { time.textContent = fmtTenth(video.currentTime); });
   video.addEventListener('seeked', () => video.dispatchEvent(new Event('timeupdate')));
   video.addEventListener('loadeddata', () => {
     saveBtn.disabled = false;
@@ -353,7 +567,7 @@ function showPicker(f, url) {
     saveBtn.disabled = true;
     msg.textContent = '저장 중…';
     try {
-      await saveEntry(f.id, { t: Math.round(video.currentTime * 10) / 10, thumb: capture(video), at: new Date().toISOString() });
+      await saveEntry(f.id, { t: Math.round(video.currentTime * 10) / 10, thumb: capture(video, video.videoWidth, video.videoHeight), at: new Date().toISOString() });
       renderGrid();
       viewer.close();
     } catch (e) {
@@ -372,12 +586,12 @@ function showPicker(f, url) {
     msg);
 }
 
-// 현재 프레임을 가로 최대 640px JPEG(data URL)로
-function capture(video) {
-  const w = Math.min(640, video.videoWidth);
-  const h = Math.round(video.videoHeight * w / video.videoWidth);
+// 영상/캔버스의 현재 화면을 가로 최대 640px JPEG(data URL)로
+function capture(source, sw, sh) {
+  const w = Math.min(640, sw);
+  const h = Math.round(sh * w / sw);
   const c = el('canvas', { width: w, height: h });
-  c.getContext('2d').drawImage(video, 0, 0, w, h);
+  c.getContext('2d').drawImage(source, 0, 0, w, h);
   return c.toDataURL('image/jpeg', 0.8);
 }
 
