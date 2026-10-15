@@ -118,6 +118,8 @@
   /* PC: 카드 이름 아래 태그 (폰은 공간이 좁아 숨김) */
   .card-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; margin-top: -2px; }
   .card-tags span { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 18px; }
+  .pill.tag-kind-category, .pill.tag-kind-category.on, .card-tags span.tag-kind-category { border-color: #ff4f9a; }
+  .pill.tag-kind-character, .pill.tag-kind-character.on, .card-tags span.tag-kind-character { border-color: #57b878; }
   @media (max-width: 520px), (pointer: coarse) { .card-tags { display: none; } }
   .m-in.card-in { padding: 2px 6px; font-size: 13px; border-color: var(--accent); }
   body.editing .card .name:not(.dur-line) { cursor: text; }
@@ -720,7 +722,7 @@ function setTagKind(t, kind) {
 function pill(t, count, { onclick, onStar, on, onRename, onDelete, confirm } = {}) {
   const star = el('span', { className: 'star' + (isFav(t) ? ' fav' : ''), textContent: isFav(t) ? '★' : '☆' });
   if (onStar) star.onclick = e => { e.stopPropagation(); onStar(); };
-  const p = el('button', { className: 'pill' + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
+  const p = el('button', { className: 'pill tag-kind-' + tagKind(t) + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
   if (onRename) p.append(el('span', { className: 'pen', title: '태그 이름 바꾸기',
     onclick: e => { e.stopPropagation(); editTagInline(p, t, onRename); } }));
   if (onDelete) {
@@ -1242,13 +1244,20 @@ function renderDirectory() {
     onRename: editing ? renderGrid : null,
     onDelete: editing ? () => deleteTag(t) : null, confirm: true
   }))));
-  $('#directoryMemos').replaceChildren(...directoryKinds.filter(([kind]) => kind !== currentView).map(([kind, label]) => {
+  const memos = $('#directoryMemos');
+  if (memos.dataset.view === currentView) return; // 같은 목록에서는 입력 중인 메모와 포커스를 유지
+  memos.dataset.view = currentView;
+  memos.replaceChildren(...directoryKinds.filter(([kind]) => kind !== currentView).map(([kind, label]) => {
     const ta = el('textarea', { placeholder: '이 목록의 기존 태그 입력 → ' + label + '(으)로 이동' });
     const done = el('button', { className: 'primary done', textContent: '전송' });
     done.onclick = () => {
-      const moving = parseTags(ta.value).filter(t => counts.has(t) && tagKind(t) === currentView);
+      ta.focus({ preventScroll: true });
+      if (!document.body.classList.contains('editing')) return;
+      const currentCounts = tagCounts();
+      const moving = parseTags(ta.value).filter(t => currentCounts.has(t) && tagKind(t) === currentView);
       if (!moving.length) return;
       for (const t of moving) setTagKind(t, kind);
+      ta.value = '';
       renderGrid();
       flushSaves();
     };
@@ -1324,7 +1333,7 @@ function videoCard(f, counts = tagCounts()) {
   };
   const card = el('button', { className: 'card', onclick: onCard },
     thumb, nameEl,
-    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { textContent: t }))) : null, // PC: 이 영상의 태그
+    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t), textContent: t }))) : null, // PC: 이 영상의 태그
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }

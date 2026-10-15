@@ -91,7 +91,40 @@ const root = path.resolve(__dirname, '..');
     assert.equal(roundtrip.videos.keep.file,'existing-thumb');
     assert.equal(roundtrip.tagKinds['게임'],'category');
     assert.equal(roundtrip.marks.a,'star');
+    for (const source of ['normal','character','category']) {
+      await page.evaluate(source=>{
+        gallery.tags={a:['첫째','둘째','셋째']}; gallery.tagKinds={};
+        if(source!=='normal') for(const t of gallery.tags.a) gallery.tagKinds[t]=source;
+        filters=EMPTY_FILTERS(); query=''; currentView=source; setEditMode(true); renderGrid();
+      },source);
+      const first=page.locator('#directoryMemos textarea').nth(0);
+      const other=page.locator('#directoryMemos textarea').nth(1);
+      await other.fill('미전송');
+      await first.fill('첫째'); await first.press('Enter');
+      assert.equal(await first.evaluate(n=>n===document.activeElement),true,source+' focus after Enter');
+      assert.equal(await first.inputValue(),'');
+      assert.equal(await other.inputValue(),'미전송');
+      await first.fill('둘째'); await first.press('Enter');
+      assert.equal(await first.evaluate(n=>n===document.activeElement),true);
+      await first.fill('셋째'); await page.locator('#directoryMemos .m-sec').nth(0).getByRole('button',{name:'전송'}).click();
+      assert.equal(await first.evaluate(n=>n===document.activeElement),true,source+' focus after Send');
+      assert.equal(await other.inputValue(),'미전송');
+    }
+    const colors=await page.evaluate(()=>{
+      gallery.tags={a:['카테고리색','캐릭터색','일반색']}; gallery.tagKinds={'카테고리색':'category','캐릭터색':'character'};
+      currentView='';renderGrid();
+      const wrap=document.createElement('div');document.body.append(wrap);
+      const style=n=>{const s=getComputedStyle(n);return {border:s.borderColor,bg:s.backgroundColor,color:s.color};};
+      const pills=gallery.tags.a.map(t=>{const n=pill(t,1);wrap.append(n);return style(n);});
+      const chips=[...document.querySelector('.card[data-id="a"] .card-tags').children].map(style);
+      wrap.remove(); return {pills,chips};
+    });
+    assert.equal(colors.pills[0].border,'rgb(255, 79, 154)');
+    assert.equal(colors.pills[1].border,'rgb(87, 184, 120)');
+    assert.equal(colors.pills[0].bg,colors.pills[2].bg);assert.equal(colors.pills[1].color,colors.pills[2].color);
+    assert.ok(colors.chips.some(s=>s.border==='rgb(255, 79, 154)'));
+    assert.ok(colors.chips.some(s=>s.border==='rgb(87, 184, 120)'));
     assert.deepEqual(errors, []);
-    console.log('PASS directories, edit gating, transfer, search, marks, mobile layout, persistence maps, no runtime errors');
+    console.log('PASS directories, edit gating, transfer, search, marks, mobile layout, persistence maps, memo repeated entry/focus/drafts, border-only kind colors, no runtime errors');
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
