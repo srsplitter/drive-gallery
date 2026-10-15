@@ -154,7 +154,7 @@
   }
   /* 카테고리 바: 화면 맨 위에 붙어 따라옴(모든 기기). 바깥(#catbar)은 고정만, 안쪽(.catscroll)은 가로 스크롤만 —
      둘을 한 요소에 같이 두면 일부 폰 브라우저에서 고정이 풀리거나 페이지 전체가 옆으로 밀림 */
-  #catbar { display: flex; align-items: center; position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
+  #catbar { display: flex; flex-wrap: wrap; align-items: center; position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
     background: rgba(17,19,23,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
   #catbar[hidden] { display: none; }
   .catscroll { display: flex; gap: 6px; align-items: center; padding: 8px 16px; max-width: 100%; box-sizing: border-box;
@@ -162,7 +162,8 @@
   .catscroll::-webkit-scrollbar { display: none; }
   .chip { flex: none; padding: 6px 12px; border-radius: 999px; font-size: 14px; white-space: nowrap; }
   .chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-  .catscroll .search { flex: 1; min-width: 120px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--accent);
+  .search-row { display: flex; flex-basis: 100%; min-width: 0; padding: 0 16px 10px; box-sizing: border-box; }
+  .search-row .search { flex: 1; min-width: 0; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--accent);
     background: var(--bg); color: var(--text); font: inherit; }
   .cat { scroll-margin-top: calc(var(--sticky-h, 0px) + 8px); }
   header button { white-space: nowrap; }
@@ -1249,7 +1250,7 @@ function renderGrid() {
   $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title';
   renderBulk();
   if (currentView === 'series') $('#grid').replaceChildren(SeriesUI.library());
-  else if (currentView === 'title') $('#grid').replaceChildren(TitleEditor.render(shown, counts));
+  else if (currentView === 'title') { $('#grid').replaceChildren(TitleEditor.render(shown, counts)); ManualOrderUI.bind(); }
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
@@ -1304,7 +1305,7 @@ function renderCatbar() {
   if (searchOpen) {
     if (!bar.querySelector('.search')) { buildSearchBar(false); return updateSticky(); }
     const strip = bar.querySelector('.catscroll');
-    strip.querySelector('.search').placeholder = searchPlaceholder();
+    bar.querySelector('.search').placeholder = searchPlaceholder();
     const close = strip.querySelector('[title="검색 닫기"]');
     if (close) close.hidden = currentView === 'title';
     for (const b of strip.querySelectorAll('[aria-pressed]')) b.remove();
@@ -1393,7 +1394,9 @@ function buildSearchBar(focus) {
   };
   input.onkeydown = e => { if (e.key === 'Escape') closeSearch(); };
   $('#catbar').replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', hidden: currentView === 'title', onclick: closeSearch }), input, ...directoryTabs()), SeriesUI.toolbar());
+    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', hidden: currentView === 'title', onclick: closeSearch }), ...directoryTabs()), SeriesUI.toolbar(),
+    el('div', { className: 'search-row' }, input));
+  updateSticky();
   if (focus) input.focus();
 }
 

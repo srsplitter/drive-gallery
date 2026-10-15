@@ -70,7 +70,7 @@
 // Browser glue stays separate from pure numeric ordering API above.
 const ManualOrderUI = (() => {
   let dragging = null, suppressClickUntil = 0, flushQueued = false;
-  const enabled = () => document.body.classList.contains('editing') && !currentView && !SeriesUI.mode && !randomRank;
+  const enabled = () => document.body.classList.contains('editing') && (!currentView || currentView === 'title') && !SeriesUI.mode && !randomRank;
   const auto = namespace => GalleryOrder.sortVideos(namespace === 'favorites' ? items.filter(isLoved) : items,
     { ...gallery, loved: {} }, items);
   const ranks = namespace => (gallery.order || {})[namespace] || {};
@@ -108,7 +108,7 @@ const ManualOrderUI = (() => {
       card.classList.remove('order-before', 'order-after', 'order-dragging'));
   }
   function bind() {
-    for (const [selector, namespace] of [['#regularVideos', 'regular'], ['#favoriteVideos', 'favorites']]) {
+    for (const [selector, namespace] of [['#regularVideos', 'regular'], ['#favoriteVideos', 'favorites'], ['#titleEditor .cat-grid', 'regular']]) {
       const section = document.querySelector(selector);
       if (!section) continue;
       const cards = [...section.querySelectorAll('.card[data-id]')];
