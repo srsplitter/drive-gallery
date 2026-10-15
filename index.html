@@ -40,6 +40,8 @@
   #status.error { color: var(--danger); }
   .cat { margin-bottom: 28px; }
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
+  #favoriteVideos h2 { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
+  #favoriteVideos + hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
   /* 왼쪽 아래 ☰ 메뉴 버튼 (목록이 보일 때만) → 태그·통합·시간·카테고리 검색, 단 수(폰), 랜덤 */
@@ -1210,7 +1212,7 @@ function renderGrid() {
     onclick: () => { filters = EMPTY_FILTERS(); menuDraft = null; renderGrid(); if (menu.open) renderMenu(); } }));
   const counts = tagCounts();
   const filtered = visible.filter(f => (currentView === 'series' || !query || f.name.toLowerCase().includes(query)) && matchesFilters(f));
-  shown = window.GalleryOrder.sortVideos(filtered, gallery, items);
+  shown = window.GalleryOrder.sortVideos(filtered, { ...gallery, loved: {} }, items);
   if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
   shown = window.GallerySeries.arrange(shown, gallery.series);
   $('#bulkTag').hidden = !!currentView;
@@ -1218,7 +1220,16 @@ function renderGrid() {
   renderBulk();
   if (currentView === 'series') $('#grid').replaceChildren(SeriesUI.library());
   else if (currentView) renderDirectory();
-  else $('#grid').replaceChildren(SeriesUI.grid(shown, counts));
+  else {
+    const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
+    const favorites = !SeriesUI.mode ? shown.filter(isLoved) : [];
+    if (favorites.length) {
+      const section = el('section', { id: 'favoriteVideos' },
+        el('h2', { textContent: '즐겨찾기' }),
+        el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts))));
+      $('#grid').replaceChildren(section, el('hr'), regular);
+    } else $('#grid').replaceChildren(regular);
+  }
   if (currentView) setStatus('');
   else if (query && !shown.length) setStatus('검색어가 들어간 파일이 없어요.');
   else if (nf && !shown.length) setStatus('조건에 맞는 영상이 없어요.');

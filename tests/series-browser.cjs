@@ -97,8 +97,9 @@ const root=path.resolve(__dirname,'..');
       setEditMode(true);renderGrid();openViewer(items.find(f=>f.id==='b'));
       setLoved(viewerFile,true);
     });
-    assert.equal(await page.getByRole('button',{name:'이전 영상',exact:true}).isDisabled(),true);
-    await page.getByRole('button',{name:'다음 영상',exact:true}).click();assert.equal(await page.locator('#vTitle').textContent(),'a.mp4');
+    assert.equal(await page.getByRole('button',{name:'이전 영상',exact:true}).isDisabled(),false);
+    assert.deepEqual(await page.evaluate(()=>shown.map(f=>f.id)),['a','b','c','d']);
+    await page.getByRole('button',{name:'다음 영상',exact:true}).click();assert.equal(await page.locator('#vTitle').textContent(),'c.mp4');
     await page.locator('#vClose').click();
     await page.evaluate(()=>{
       gallery.series={s:{name:'겹침 1',videoIds:['a','b','a']},t:{name:'겹침 2',videoIds:['b','c','c']}};
