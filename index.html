@@ -720,7 +720,10 @@ async function runCandJobs() {
       j.status = 'running';
       notifyCand(j);
       try {
-        j.status = await extractCandidates(j) ? 'done' : 'unsupported';
+        let ok = await extractCandidates(j);
+        // 파일에서 직접 못 뽑는 영상(예: 이 PC가 못 푸는 HEVC)은 화면 밖에 숨긴 플레이어로 (확장 필요)
+        if (!ok && extReady && !j.ac.signal.aborted) { j.shots = []; ok = await extractViaHiddenPlayer(j); }
+        j.status = ok ? 'done' : 'unsupported';
       } catch (e) {
         if (e instanceof AuthError) { j.status = 'queued'; notifyCand(j); break; } // 다시 로그인하면 이어서
         j.status = j.ac.signal.aborted ? 'aborted' : 'unsupported';
@@ -760,6 +763,45 @@ async function extractCandidates(j) {
     notifyCand(j);
   }
   return made > 0;
+}
+
+// 숨은 플레이어로 뽑기: 화면 밖(보이지 않는 곳)에 드라이브 플레이어를 하나 더 띄워
+// 음소거로 불러온 뒤 각 지점으로 옮겨 장면을 복사하고, 끝나면 치움. 보고 있는 플레이어는 건드리지 않는다.
+async function extractViaHiddenPlayer(j) {
+  const { f } = j, signal = j.ac.signal;
+  const stop = () => { if (signal.aborted) throw new DOMException('중단', 'AbortError'); };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  j.dur = 0; // 화면의 대표 장면 칸을 "뽑는 중…"으로 되돌림
+  notifyCand(j);
+  const fr = el('iframe', { src: `https://drive.google.com/file/d/${f.id}/preview?dgbg=1`, allow: 'autoplay', tabIndex: -1 });
+  fr.setAttribute('aria-hidden', 'true');
+  Object.assign(fr.style, { position: 'fixed', left: '-10000px', top: '0', width: '640px', height: '360px', border: '0' });
+  document.body.append(fr);
+  try {
+    await new Promise(r => { fr.onload = r; setTimeout(r, 15000); });
+    let dur = 0;
+    for (const t0 = Date.now(); !dur && Date.now() - t0 < 20000;) {
+      stop();
+      await extCall('bg', { action: 'kick' }).catch(() => {});
+      await sleep(700);
+      const st = await extCall('bg', { action: 'state' }).catch(() => null);
+      if (st && st.duration) dur = st.duration;
+    }
+    if (!dur) { j.reason = (j.reason ? j.reason + ' ' : '') + '(숨은 플레이어도 불러오지 못했어요)'; return false; }
+    j.dur = dur;
+    notifyCand(j);
+    let made = 0;
+    for (const [i, p] of CAND_POINTS.entries()) {
+      stop();
+      for (let w = 0; playerLoading && w < 60; w++) await sleep(200); // 보고 있는 플레이어가 먼저
+      const r = await extCall('bg', { action: 'grab', delta: p * dur }, 15000).catch(() => null);
+      if (r && r.dataUrl) { j.shots[i] = { t: r.t, thumb: r.dataUrl }; made++; } else j.shots[i] = 'fail';
+      notifyCand(j);
+    }
+    return made > 0;
+  } finally {
+    fr.remove();
+  }
 }
 
 // 수정 ON 일 때: 지금 폴더의 정렬 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개(+지금 연 영상)만 남기고 미리 뽑기
@@ -817,12 +859,14 @@ function showCandidates(f, iframe, box, captureBtn) {
         el('p', { className: 'hint', textContent: '대표 장면을 자동으로 못 뽑았어요 — ' + (j.reason || '이유를 알 수 없어요.') }));
     }
     if (!j.dur) {
+      slots = null;
       return box.replaceChildren(el('p', { className: 'hint', textContent: j.status === 'queued' ? '대표 장면: 앞 영상 다음 차례예요…' : '대표 장면 뽑는 중…' }));
     }
-    if (!slots) { slots = candSlots(box, j.dur); filled = []; }
+    // 처음이거나, 숨은 플레이어로 다시 뽑기 시작해서 길이가 바뀌면 칸을 새로 만듦
+    if (!slots || slots.dur !== j.dur) { slots = candSlots(box, j.dur); slots.dur = j.dur; filled = []; }
     j.shots.forEach((s, i) => {
-      if (!s || filled[i]) return;
-      filled[i] = true;
+      if (!s || filled[i] === s) return;
+      filled[i] = s;
       if (s === 'fail') slots[i].lastChild.textContent += ' · 실패';
       else fillSlot(f, slots[i], s.thumb, s.t);
     });
@@ -1358,10 +1402,10 @@ window.addEventListener('message', e => {
 });
 window.postMessage({ source: 'dgallery-page', type: 'ping' }, location.origin);
 
-function extCall(type, extra = {}) {
+function extCall(type, extra = {}, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const id = crypto.randomUUID();
-    const timer = setTimeout(() => { extWaiters.delete(id); reject(new Error('확장 프로그램이 응답하지 않아요.')); }, 5000);
+    const timer = setTimeout(() => { extWaiters.delete(id); reject(new Error('확장 프로그램이 응답하지 않아요.')); }, timeoutMs);
     extWaiters.set(id, res => { clearTimeout(timer); if (res.ok) resolve(res); else reject(new Error(res.error || '확장 프로그램 오류')); });
     window.postMessage({ source: 'dgallery-page', type, id, ...extra }, location.origin);
   });

@@ -10,7 +10,7 @@ window.addEventListener('message', (ev) => {
     return;
   }
 
-  if (d.type === 'capture' || d.type === 'player' || d.type === 'autoPause') {
+  if (d.type === 'capture' || d.type === 'player' || d.type === 'autoPause' || d.type === 'bg') {
     const reply = (res) => window.postMessage(Object.assign({ source: 'dgallery-ext', type: 'result', id: d.id, ok: false }, res), location.origin);
     try {
       chrome.runtime.sendMessage({

@@ -1,7 +1,8 @@
 // 서비스 워커: 갤러리 탭의 요청을 받아
 // - capture: 플레이어 프레임들의 컨트롤 등을 잠깐 숨기고 탭 화면을 찍어 돌려준다 (공유 허용 창 없음)
-// - player : 플레이어 프레임의 영상에 재생/멈춤·시간 이동을 적용한다
-// 드라이브 플레이어가 어떤 주소의 하위 프레임에서 영상을 재생하든 찾도록, 탭의 모든 하위 프레임에 직접 실행한다.
+// - player : 보고 있는 플레이어의 영상에 재생/멈춤·시간 이동을 적용한다
+// - bg     : 화면 밖에 숨겨 둔 플레이어(주소에 dgbg=1)로 대표 장면을 뽑는다 (파일에서 직접 못 뽑는 영상용)
+// 드라이브 플레이어가 어떤 주소의 하위 프레임에서 영상을 재생하든 찾도록, 프레임마다 직접 실행한다.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tab = sender.tab;
   if (!tab) return;
@@ -22,18 +23,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return;
   }
 
-  if (msg.type === 'capture') {
-    capture(tab).then(sendResponse, (e) => sendResponse({ ok: false, error: '캡처 실패: ' + (e && e.message || e) }));
-    return true; // 비동기 응답
-  }
-  if (msg.type === 'player') {
-    player(tab, msg.action, msg.delta).then(sendResponse, (e) => sendResponse({ ok: false, error: '플레이어 조작 실패: ' + (e && e.message || e) }));
-    return true;
-  }
+  const run = (p, label) => p.then(sendResponse, (e) => sendResponse({ ok: false, error: label + ': ' + (e && e.message || e) }));
+  if (msg.type === 'capture') { run(capture(tab), '캡처 실패'); return true; }
+  if (msg.type === 'player') { run(player(tab, msg.action, msg.delta), '플레이어 조작 실패'); return true; }
+  if (msg.type === 'bg') { run(hidden(tab, msg.action, msg.delta), '숨은 플레이어 실패'); return true; }
 });
 
-function inFrames(tab, func, args) {
-  return chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func, args });
+// 탭의 프레임을 "보이는 플레이어 쪽(fg)"과 "숨은 플레이어 쪽(bg: dgbg=1 프레임과 그 하위)"으로 나눔
+async function frameGroups(tab) {
+  const frames = (await chrome.webNavigation.getAllFrames({ tabId: tab.id })) || [];
+  const bg = new Set(frames.filter((f) => /[?&#]dgbg=1/.test(f.url)).map((f) => f.frameId));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const f of frames) if (!bg.has(f.frameId) && bg.has(f.parentFrameId)) { bg.add(f.frameId); grew = true; }
+  }
+  return { bg: [...bg], fg: frames.map((f) => f.frameId).filter((id) => id !== 0 && !bg.has(id)) };
+}
+
+// 그 쪽 프레임마다 실행해 결과만 모음 (실행 못 하는 프레임은 건너뜀)
+async function inFrames(tab, func, args = [], which = 'fg', world = 'ISOLATED') {
+  const ids = (await frameGroups(tab))[which];
+  const rs = await Promise.allSettled(ids.map((id) =>
+    chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [id] }, func, args, world })));
+  return rs.flatMap((r) => (r.status === 'fulfilled' ? r.value.map((x) => x.result) : [])).filter(Boolean);
 }
 
 async function capture(tab) {
@@ -47,23 +59,18 @@ async function capture(tab) {
   }
 }
 
-// 페이지 쪽(MAIN world)에서 실행 — 유튜브 플레이어 자체 함수(playVideo 등)는 페이지 쪽에서만 보인다
-function inFramesMain(tab, func) {
-  return chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, world: 'MAIN', func })
-    .then((rs) => rs.map((r) => r.result).filter(Boolean), () => []);
-}
-
 async function player(tab, action, delta) {
   if (action === 'kick') {
     // 드라이브 플레이어 안은 유튜브 플레이어: 처음엔 <video> 가 비어 있어 video.play() 로는 안 됨 → 플레이어에 직접 재생 명령
-    const main = await inFramesMain(tab, frameKickMain);
+    // (페이지 쪽 MAIN world 에서만 플레이어 자체 함수가 보임)
+    const main = await inFrames(tab, frameKickMain, [], 'fg', 'MAIN');
     if (main.length) return { ok: true, kicked: true, clicked: main.join(' / ') };
   }
   if (action === 'unmute') {
-    await inFramesMain(tab, frameUnmuteMain);
+    await inFrames(tab, frameUnmuteMain, [], 'fg', 'MAIN');
     return { ok: true };
   }
-  const frames = (await inFrames(tab, framePlayer, [action, delta])).map((r) => r.result).filter(Boolean);
+  const frames = await inFrames(tab, framePlayer, [action, delta]);
   if (action === 'kick') {
     const kicked = frames.filter((r) => r.kicked);
     return { ok: true, kicked: kicked.length > 0, clicked: kicked.map((r) => `${r.where} → ${r.clicked}`).join(' / ') || '누를 곳을 못 찾음' };
@@ -72,6 +79,23 @@ async function player(tab, action, delta) {
   if (hit) return { ok: true, paused: hit.paused, time: hit.time, duration: hit.duration };
   const seen = frames.map((r) => `${r.where}(영상 ${r.videos})`).join(', ') || '하위 프레임 없음';
   return { ok: false, error: `플레이어 영상을 찾지 못했어요. 찾아본 프레임: ${seen}` };
+}
+
+// 숨은 플레이어: kick(음소거 재생) / state(길이) / grab(그 시각 장면을 이미지로)
+async function hidden(tab, action, t) {
+  if (action === 'kick') {
+    const main = await inFrames(tab, frameKickMain, [], 'bg', 'MAIN');
+    return { ok: true, kicked: main.length > 0 };
+  }
+  if (action === 'state') {
+    const hit = (await inFrames(tab, framePlayer, ['state', 0], 'bg')).find((r) => r.acted);
+    return { ok: true, duration: hit ? hit.duration : 0 };
+  }
+  if (action === 'grab') {
+    const shot = (await inFrames(tab, frameGrab, [t], 'bg')).find((r) => r.dataUrl);
+    return shot ? { ok: true, ...shot } : { ok: false, error: '장면을 복사하지 못했어요' };
+  }
+  return { ok: false, error: '알 수 없는 요청' };
 }
 
 // ↓ 아래 함수들은 각 프레임 안에서 실행됨 (바깥 변수 사용 불가). 최상위(갤러리 페이지)에서는 아무것도 안 함.
@@ -182,4 +206,35 @@ async function framePlayer(action, delta) {
   } // action === 'state': 상태만 알려줌
   return { where, videos: found.length, acted: true, paused: v.paused, time: v.currentTime,
     duration: Number.isFinite(v.duration) ? v.duration : 0 };
+}
+
+// 숨은 플레이어용: t초로 옮겨 그 장면을 이미지(JPEG, 긴 변 640)로. 유튜브 플레이어의 영상은 플레이어가 직접 이어 붙인
+// 내부 스트림이라 그대로 복사할 수 있다(화면에 안 보여도 됨).
+async function frameGrab(t) {
+  if (window === window.top) return null;
+  const found = [];
+  const walk = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      if (el.tagName === 'VIDEO') found.push(el);
+      if (el.shadowRoot) walk(el.shadowRoot);
+    }
+  };
+  walk(document);
+  const v = found.find((x) => x.readyState > 0) || found[0];
+  if (!v) return null;
+  v.pause();
+  if (Math.abs(v.currentTime - t) > 0.05) {
+    const seeked = new Promise((r) => { v.addEventListener('seeked', r, { once: true }); setTimeout(r, 8000); });
+    v.currentTime = t;
+    await seeked;
+  }
+  for (let i = 0; i < 50 && v.readyState < 2; i++) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 120));
+  if (!v.videoWidth) return null;
+  const k = Math.min(1, 640 / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * k);
+  c.height = Math.round(v.videoHeight * k);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return { dataUrl: c.toDataURL('image/jpeg', 0.8), t: v.currentTime };
 }
