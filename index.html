@@ -51,9 +51,30 @@
   #menuBtn i::before, #menuBtn i::after { content: ''; position: absolute; left: 0; }
   #menuBtn i::before { top: -6px; } #menuBtn i::after { top: 6px; }
   #catbar[hidden] ~ #menuBtn { display: none; }
-  #menu { width: min(420px, 100vw - 16px); max-height: min(85dvh, 760px); margin: auto auto 16px 16px; }
-  @media (max-width: 520px) { #menu { width: 100vw; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0;
-    padding-bottom: env(safe-area-inset-bottom); } }
+  /* PC: 왼쪽에서 밀려 나오는 패널(어둡게 안 깔고 뒤 목록도 그대로 쓸 수 있음). 헤더 아래부터 화면 끝까지, 내용이 길면 안에서 스크롤 */
+  #menu { position: fixed; left: 0; top: var(--menu-top, 0px); bottom: 0; height: auto; max-height: none; width: 360px;
+    margin: 0; border-radius: 0 14px 14px 0; border-left: 0; z-index: 30; display: flex; flex-direction: column;
+    transform: translateX(-102%); transition: transform .22s ease; box-shadow: 8px 0 24px rgba(0,0,0,.45); }
+  #menu:not([open]) { display: none; }
+  #menu.in { transform: none; }
+  #menu .v-head { flex: none; }
+  #menu .m-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  #menu::backdrop { background: transparent; }
+  /* 폰: 아래에서 올라오는 시트 */
+  @media (max-width: 520px) { #menu { top: auto; width: 100vw; max-width: none; max-height: 85dvh; border-radius: 16px 16px 0 0;
+    border-left: 1px solid var(--line); transform: translateY(102%); padding-bottom: env(safe-area-inset-bottom); }
+    #menu::backdrop { background: rgba(0,0,0,.5); } }
+  #menu .v-head .icon-btn { padding: 6px 10px; }
+  .m-time .m-in { flex: 1; width: auto; text-align: center; }
+  .m-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .m-grid2 button { justify-content: center; text-align: center; }
+  @media not ((max-width: 520px) or (pointer: coarse)) { .m-grid2 { grid-template-columns: 1fr; } } /* PC 는 단 수 버튼이 없어 랜덤이 한 줄 */
+  .m-grid2 button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  /* 카테고리 바 맨 오른쪽 [편집] */
+  #catbar:not([hidden]) { display: flex; align-items: center; }
+  #catbar .catscroll { flex: 1; min-width: 0; }
+  .cat-edit { flex: none; margin-right: 12px; padding: 6px 12px; border-radius: 999px; font-size: 14px; }
+  .chip.off { opacity: .45; text-decoration: line-through; }
   .m-body { padding: 12px 14px; display: grid; gap: 14px; }
   .m-sec { display: grid; gap: 6px; }
   .m-sec > b { font-size: 13px; color: var(--dim); font-weight: 600; }
@@ -126,6 +147,10 @@
   #editNote[hidden] { display: none; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
+  .poster { position: absolute; inset: 0; padding: 0; border: 0; border-radius: 8px; background: #000; overflow: hidden; display: grid; place-items: center; }
+  .poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .poster .play { position: relative; width: 72px; height: 72px; border-radius: 50%; background: rgba(0,0,0,.6);
+    color: #fff; font-size: 30px; display: grid; place-items: center; padding-left: 5px; }
   .row.end { justify-content: flex-end; }
   .card.next-todo { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   .card.is-hidden { opacity: .45; }
@@ -218,6 +243,7 @@
 <dialog id="menu">
   <div class="v-head">
     <div class="title">☰ 메뉴</div>
+    <button id="menuReset" class="icon-btn" aria-label="검색 조건 초기화" title="검색 조건 초기화">↻</button>
     <button id="menuClose" aria-label="닫기">✕</button>
   </div>
   <div class="m-body" id="mBody"></div>
@@ -389,14 +415,18 @@ async function api(url, opts = {}) {
   if (!token || Date.now() > tokenExp) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
   const res = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
   if (res.status === 401) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
-  if (!res.ok) throw new Error(`드라이브 요청 실패 (${res.status})`);
+  if (!res.ok) { // 드라이브가 알려 준 이유도 같이 (예: 403 insufficientPermissions)
+    let why = '';
+    try { const j = await res.json(); why = j.error && (j.error.message || (j.error.errors && j.error.errors[0] && j.error.errors[0].reason)) || ''; } catch {}
+    throw new Error(`드라이브 요청 실패 (${res.status}${why ? ': ' + why : ''})`);
+  }
   return res;
 }
 
 // ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
 // gallery.json: { videos: { 영상ID: 지정 썸네일 }, hidden: { 영상ID: true(갤러리에서만 숨김) },
-//                 tags: { 영상ID: [태그…] }, fav: { 태그: true(즐겨찾기) } }
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {} }, galleryFileId = null;
+//                 tags: { 영상ID: [태그…] }, fav: { 태그: true(즐겨찾기) }, hiddenCats: { 카테고리: true(표시 안 함) } }
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -406,11 +436,11 @@ async function readRemote() {
   const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
   const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
   const data = files.length ? await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json() : {};
-  for (const k of ['videos', 'hidden', 'tags', 'fav']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -557,20 +587,47 @@ function matchesFilters(f) {
 }
 
 const menu = $('#menu');
-$('#menuClose').onclick = () => menu.close();
-menu.addEventListener('click', e => { if (e.target === menu) menu.close(); }); // 바깥(어두운 곳) 누르면 닫힘
-$('#menuBtn').onclick = () => { renderMenu(); menu.showModal(); };
+const EMPTY_FILTERS = () => ({ tags: [], text: '', min: null, max: null, cats: [] });
+// 메뉴 칸에 적어 둔 내용(검색을 눌러도, 닫았다 열어도 그대로). [검색]을 누르면 이 내용이 조건이 됨
+let menuDraft = null;
+const phoneMenu = () => matchMedia('(max-width: 520px)').matches;
+
+// PC: 헤더 아래부터 화면 끝까지(헤더가 스크롤로 사라지면 맨 위부터)
+function placeMenu() {
+  const top = Math.max(0, document.querySelector('header').getBoundingClientRect().bottom);
+  document.documentElement.style.setProperty('--menu-top', top + 'px');
+}
+addEventListener('scroll', () => { if (menu.open) placeMenu(); }, { passive: true });
+
+function openMenu() {
+  renderMenu();
+  placeMenu();
+  if (!menu.open) phoneMenu() ? menu.showModal() : menu.show(); // PC 는 어둡게 깔지 않고 뒤 목록도 그대로 쓸 수 있게
+  void menu.offsetWidth; // 열린 상태를 먼저 그려야 밀려 나오는 움직임이 보임
+  menu.classList.add('in');
+}
+function closeMenu() {
+  menu.classList.remove('in');
+  setTimeout(() => { if (!menu.classList.contains('in')) menu.close(); }, 230);
+}
+menu.addEventListener('close', () => menu.classList.remove('in'));
+$('#menuClose').onclick = closeMenu;
+$('#menuReset').onclick = () => { menuDraft = null; filters = EMPTY_FILTERS(); renderGrid(); renderMenu(); };
+menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); }); // 폰: 바깥(어두운 곳) 누르면 닫힘
+$('#menuBtn').onclick = () => (menu.open && menu.classList.contains('in') ? closeMenu() : openMenu());
 
 function renderMenu() {
   const editing = document.body.classList.contains('editing');
-  const draft = { ...filters, tags: [...filters.tags], cats: [...filters.cats] }; // [검색] 전까지는 여기만 바뀜
+  if (!menuDraft) menuDraft = { ...filters, tags: [...filters.tags], cats: [...filters.cats], tagQ: '' };
+  const draft = menuDraft;
   const counts = tagCounts();
 
   // 태그 검색: 고른 태그(✕로 빼기) + 입력 + 추천 알약
   const chosen = el('div', { className: 'pills' });
-  const tagIn = el('input', { className: 'm-in', placeholder: '태그 입력 (예: 4k)', enterKeyHint: 'search' });
+  const tagIn = el('input', { className: 'm-in', placeholder: '태그 입력 (예: 4k)', enterKeyHint: 'search', value: draft.tagQ });
   const sugg = el('div', { className: 'pills' });
   const drawTags = () => {
+    draft.tagQ = tagIn.value;
     chosen.replaceChildren(...draft.tags.map(t => {
       const p = pill(t, 0, { on: true, onclick: () => { draft.tags = draft.tags.filter(x => x !== t); drawTags(); } });
       p.append(' ✕');
@@ -593,16 +650,20 @@ function renderMenu() {
     const q = tagIn.value.trim().toLowerCase();
     const hit = [...counts.keys()].find(t => t.toLowerCase() === q) || [...counts.keys()].find(t => t.toLowerCase().includes(q));
     if (q && hit && !draft.tags.includes(hit)) { draft.tags.push(hit); tagIn.value = ''; drawTags(); }
+    else apply();
   };
   drawTags();
 
-  const textIn = el('input', { className: 'm-in', placeholder: '제목 또는 태그에 들어간 글자', value: draft.text, enterKeyHint: 'search' });
-  const minIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최소', value: draft.min ?? '' });
-  const maxIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최대', value: draft.max ?? '' });
+  const num = v => (String(v).trim() === '' || !(+v >= 0) ? null : +v);
+  const textIn = el('input', { className: 'm-in', placeholder: '제목 또는 태그에 들어간 글자', value: draft.text, enterKeyHint: 'search',
+    oninput: () => { draft.text = textIn.value.trim(); } });
+  const minIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최소', value: draft.min ?? '',
+    oninput: () => { draft.min = num(minIn.value); } });
+  const maxIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최대', value: draft.max ?? '',
+    oninput: () => { draft.max = num(maxIn.value); } });
 
-  // 카테고리(드라이브 폴더) 여러 개 선택. 아무것도 안 고르면 전체
-  const cats = [...new Set(items.map(f => f.category))];
-  const catBox = el('div', { className: 'pills' }, ...cats.map(c => {
+  // 카테고리(드라이브 폴더) 여러 개 선택 — 위쪽 카테고리 바 [편집]에서 표시하기로 한 것만. 아무것도 안 고르면 전체
+  const catBox = el('div', { className: 'pills' }, ...shownCats().map(c => {
     const b = el('button', { className: 'chip' + (draft.cats.includes(c) ? ' on' : ''), textContent: c });
     b.onclick = () => {
       draft.cats = draft.cats.includes(c) ? draft.cats.filter(x => x !== c) : [...draft.cats, c];
@@ -611,39 +672,31 @@ function renderMenu() {
     return b;
   }));
 
-  const num = v => (v.trim() === '' || !(+v >= 0) ? null : +v);
+  // 검색: 적어 둔 내용은 그대로 남김. 폰은 결과가 보이게 시트를 닫고, PC 패널은 열어 둠
   const apply = () => {
-    draft.text = textIn.value.trim();
-    draft.min = num(minIn.value);
-    draft.max = num(maxIn.value);
-    filters = draft;
-    menu.close();
+    filters = { tags: [...draft.tags], text: draft.text, min: draft.min, max: draft.max, cats: [...draft.cats] };
     renderGrid();
     scrollTo(0, 0);
+    if (phoneMenu()) closeMenu(); else placeMenu();
   };
   textIn.onkeydown = minIn.onkeydown = maxIn.onkeydown = e => { if (e.key === 'Enter') apply(); };
 
-  // 단 수(폰) + 랜덤: 누르는 즉시 반영
-  const cur = +document.body.dataset.cols || 2;
-  const seg = el('div', { className: 'seg phone-only' }, ...[1, 2, 3, 4].map(n => el('button', {
-    className: n === cur ? 'on' : '', textContent: n + '단',
-    onclick: e => { setCols(n); for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget); } })));
-  const randBtn = el('button', { textContent: '🔀 랜덤', onclick: () => { shuffleShown(); renderMenu(); } });
-  const sortBtn = randomRank ? el('button', { textContent: '가나다순', onclick: () => { randomRank = null; renderGrid(); renderMenu(); } }) : null;
+  // 단 수(폰, 누를 때마다 1→2→3→4→1) + 랜덤(켜면 섞고, 다시 누르면 가나다순): 누르는 즉시 반영
+  const cols = el('button', { className: 'phone-only', style: 'justify-content:center', textContent: (+document.body.dataset.cols || 2) + '단',
+    onclick: () => { const n = +document.body.dataset.cols || 2; setCols(n >= 4 ? 1 : n + 1); cols.textContent = document.body.dataset.cols + '단'; } });
+  const rand = el('button', { className: randomRank ? 'on' : '', textContent: '랜덤', title: randomRank ? '다시 누르면 가나다순' : '지금 보이는 영상을 섞기',
+    onclick: () => { if (randomRank) { randomRank = null; renderGrid(); } else shuffleShown(); renderMenu(); } });
 
   $('#mBody').replaceChildren(
     el('div', { className: 'm-sec' }, el('b', { textContent: '태그 검색 (고른 태그가 모두 있는 영상만)' }), chosen, tagIn, sugg,
       editing ? el('p', { className: 'hint', style: 'margin:0', textContent: '수정 ON: 알약의 ☆ 를 누르면 즐겨찾기' }) : null),
     el('div', { className: 'm-sec' }, el('b', { textContent: '통합 검색' }), textIn),
-    el('div', { className: 'm-sec' }, el('b', { textContent: '길이 (분)' }),
-      el('div', { className: 'm-time' }, minIn, el('span', { textContent: '~' }), maxIn, el('span', { className: 'hint', textContent: '분' }))),
-    el('div', { className: 'm-sec' }, el('b', { textContent: '카테고리 (여러 개 선택)' }), catBox),
-    el('div', { className: 'row' },
-      el('button', { className: 'primary', style: 'flex:1', textContent: '검색', onclick: apply }),
-      el('button', { textContent: '조건 지우기', onclick: () => {
-        filters = { tags: [], text: '', min: null, max: null, cats: [] }; renderGrid(); renderMenu(); } })),
-    el('div', { className: 'row' }, seg, randBtn, sortBtn),
-    editing ? bracketTool() : null);
+    el('div', { className: 'm-sec' }, el('b', { textContent: '길이' }),
+      el('div', { className: 'm-time' }, minIn, maxIn, el('span', { className: 'hint', textContent: '분' }))),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '카테고리' }), catBox),
+    el('button', { className: 'primary', textContent: '검색', onclick: apply }),
+    el('div', { className: 'm-grid2' }, cols, rand),
+    ...(editing ? [bracketTool()] : []).filter(Boolean));
 }
 
 // 지금 보이는 영상들만 순서를 섞음(조건은 그대로). 카테고리 구역은 유지하고 구역 안에서 섞음
@@ -734,11 +787,11 @@ function renderGrid() {
   const nf = filterCount();
   $('#menuBtn').classList.toggle('on', nf > 0);
   if (nf) $('#crumbs').append(el('button', { className: 'small', textContent: `🔎 조건 ${nf}개 ✕`, title: '검색 조건 지우기',
-    onclick: () => { filters = { tags: [], text: '', min: null, max: null, cats: [] }; renderGrid(); } }));
+    onclick: () => { filters = EMPTY_FILTERS(); menuDraft = null; renderGrid(); if (menu.open) renderMenu(); } }));
   const groups = new Map();
   for (const f of visible) {
     if (query && !f.name.toLowerCase().includes(query)) continue; // 🔍 파일 이름 검색
-    if (!matchesFilters(f)) continue;
+    if (gallery.hiddenCats[f.category] || !matchesFilters(f)) continue; // 카테고리 바 [편집]에서 끈 카테고리는 안 보임
     if (!groups.has(f.category)) groups.set(f.category, []);
     groups.get(f.category).push(f);
   }
@@ -760,14 +813,34 @@ function renderGrid() {
 // ---------- 카테고리 바 (🔍 검색 + 카테고리로 바로 가기) ----------
 let query = '', searchOpen = false, catChips = [];
 
+// 표시하기로 한 카테고리 (☰ 메뉴의 카테고리 목록도 이것만)
+const shownCats = () => [...new Set(items.map(f => f.category))].filter(c => !gallery.hiddenCats[c]);
+let catEditing = false;
+
 function renderCatbar(sections) {
   const bar = $('#catbar');
   bar.hidden = !items.length;
   if (searchOpen) return updateSticky(); // 검색 중엔 입력칸을 그대로 둠
+  if (catEditing) { // [편집]: 카테고리를 눌러 표시/숨김 (줄 그어진 건 숨김), [완료]로 끝
+    catChips = [];
+    bar.replaceChildren(el('div', { className: 'catscroll' }, ...[...new Set(items.map(f => f.category))].map(c => {
+      const b = el('button', { className: 'chip' + (gallery.hiddenCats[c] ? ' off' : ''), textContent: c });
+      b.onclick = () => {
+        if (gallery.hiddenCats[c]) delete gallery.hiddenCats[c]; else gallery.hiddenCats[c] = true;
+        pendingSaves.set('c:' + c, gallery.hiddenCats[c] || null);
+        flushSaves();
+        renderGrid();
+      };
+      return b;
+    })), el('button', { className: 'cat-edit primary', textContent: '완료', onclick: () => { catEditing = false; renderGrid(); } }));
+    return updateSticky();
+  }
   catChips = sections.map(s => ({ section: s.el,
     chip: el('button', { className: 'chip', textContent: `${s.cat} ${s.count}`, onclick: () => s.el.scrollIntoView({ block: 'start' }) }) }));
   bar.replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }), ...catChips.map(c => c.chip)));
+    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }), ...catChips.map(c => c.chip)),
+    el('button', { className: 'cat-edit', textContent: '편집', title: '표시할 카테고리 고르기',
+      onclick: () => { catEditing = true; renderGrid(); } }));
   updateSticky();
   markActiveChip();
 }
@@ -898,6 +971,17 @@ function fullscreen(player) {
   if (go) Promise.resolve(go.call(player)).catch(() => {});
 }
 
+// ⛶ 전체화면. 아이폰 <video>: 불러온 뒤면 기본 전체화면 플레이어(webkitEnterFullscreen), 아직 안 불러왔으면
+// 그 상태로 부르면 오류가 나고 그 뒤로 먹통이 되므로, 인라인 재생을 잠깐 끄고 재생 → 아이폰이 알아서 전체화면으로 엶
+function videoFullscreen(p) {
+  if (p.tagName !== 'VIDEO' || !p.webkitEnterFullscreen) return fullscreen(p);
+  if (p.readyState >= 1) { try { p.webkitEnterFullscreen(); } catch {} return; }
+  p.playsInline = false;
+  p.addEventListener('webkitendfullscreen', () => { p.playsInline = true; }, { once: true });
+  const go = () => p.play().catch(() => { p.playsInline = true; });
+  if (p.getAttribute('src')) go(); else p.addEventListener('loadstart', go, { once: true });
+}
+
 // 드라이브 파일을 sw.js 로 받아 <video> 로 재생(폰). 드라이브 플레이어로는 절대 바꾸지 않음
 // (아이폰은 재생 중에도 일시적인 오류 이벤트가 오고, 드라이브 플레이어는 컨트롤이 겹쳐 터치를 뺏음).
 // 아예 못 불러왔을 때만 영상 아래에 이유를 한 줄 보여줌.
@@ -936,7 +1020,7 @@ function directPlayer(f) {
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
 viewer.addEventListener('close', () => {
-  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); lockPage(false); }
+  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); lockPage(false); slideTo(0, 0); }
   if (history.state && history.state.viewer) history.back(); // 폰 페이지: 열 때 넣은 기록을 되돌림
 });
 $('#vClose').onclick = () => viewer.close();
@@ -960,22 +1044,42 @@ function lockPage(on) {
 
 // 영상 창에서 옆으로 밀면 이전/다음 영상 (지금 목록에 보이는 순서). 세로로 미는 건 그대로 스크롤.
 // 영상 아래쪽 컨트롤(재생 위치 막대)과 입력칸에서 시작한 건 무시
-let swipe = null;
+// 손가락을 따라 화면이 옆으로 밀리고, 충분히 밀면 지금 화면이 빠져나가고 다음 영상 화면이 반대쪽에서 들어옴
+let swipe = null, sliding = false;
+const vBody = $('#vBody');
+const slideTo = (x, ms) => { vBody.style.transition = ms ? `transform ${ms}ms ease-out` : 'none'; vBody.style.transform = x ? `translateX(${x}px)` : ''; };
 viewer.addEventListener('touchstart', e => {
   const t = e.touches[0], target = e.target;
   swipe = null;
-  if (e.touches.length !== 1 || target.closest('input, textarea, .cropper')) return;
-  if (target.tagName === 'VIDEO' && t.clientY > target.getBoundingClientRect().bottom - 80) return;
-  swipe = { x: t.clientX, y: t.clientY, at: Date.now() };
+  if (sliding || e.touches.length !== 1 || target.closest('input, textarea, .cropper')) return;
+  if (target.tagName === 'VIDEO' && t.clientY > target.getBoundingClientRect().bottom - 80) return; // 재생 위치 막대
+  swipe = { x: t.clientX, y: t.clientY, at: Date.now(), dir: null };
+}, { passive: true });
+viewer.addEventListener('touchmove', e => {
+  if (!swipe) return;
+  const t = e.touches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+  if (!swipe.dir && Math.hypot(dx, dy) > 10) swipe.dir = Math.abs(dx) > Math.abs(dy) * 1.5 ? 'x' : 'y'; // 처음 움직인 방향으로 확정
+  if (swipe.dir !== 'x') return;
+  const i = shown.indexOf(viewerFile), has = shown[i + (dx < 0 ? 1 : -1)];
+  slideTo(has ? dx : dx / 4, 0); // 더 갈 영상이 없으면 살짝만 끌림
 }, { passive: true });
 viewer.addEventListener('touchend', e => {
-  if (!swipe || !viewerFile) return;
-  const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
-  const ok = Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2 && Date.now() - swipe.at < 700;
+  const s = swipe;
   swipe = null;
-  if (!ok) return;
+  if (!s || s.dir !== 'x' || !viewerFile) return;
+  const dx = e.changedTouches[0].clientX - s.x, w = vBody.clientWidth;
   const i = shown.indexOf(viewerFile), next = shown[i + (dx < 0 ? 1 : -1)];
-  if (i >= 0 && next) openViewer(next);
+  if (i < 0 || !next || (Math.abs(dx) < w * 0.25 && !(Math.abs(dx) > 50 && Date.now() - s.at < 300))) return slideTo(0, 180); // 제자리로
+  sliding = true;
+  const out = dx < 0 ? -w : w;
+  slideTo(out, 160);
+  setTimeout(() => {
+    openViewer(next);
+    slideTo(-out, 0);
+    void vBody.offsetWidth;
+    slideTo(0, 220);
+    setTimeout(() => { vBody.style.transition = ''; sliding = false; }, 230);
+  }, 160);
 }, { passive: true });
 
 let viewerFile = null;
@@ -997,6 +1101,19 @@ function openViewer(f) {
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
   const imageBtn = el('button', { className: 'edit-only', textContent: '🖼️ 이미지로 지정', onclick: () => fileInput.click() });
   const playerWrap = el('div', { className: 'player-wrap' }, iframe); // 영역 조절기가 이 위에 겹쳐 뜸
+  // 폰(<video>): 재생 전에는 내가 정한 썸네일(없으면 드라이브 썸네일)을 영상 위에 띄움 → 누르면 재생
+  const poster = custom ? custom.thumb : (f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s1280') : '');
+  if (iframe.tagName === 'VIDEO' && poster) {
+    const cover = el('button', { className: 'poster', title: '재생' },
+      el('img', { src: poster, alt: '', referrerPolicy: 'no-referrer' }), el('span', { className: 'play', textContent: '▶' }));
+    cover.onclick = () => { // 주소가 아직 안 붙었으면(재생 준비 중) 붙는 즉시 재생
+      cover.remove();
+      const go = () => iframe.play().catch(() => {});
+      if (iframe.getAttribute('src')) go(); else iframe.addEventListener('loadstart', go, { once: true });
+    };
+    iframe.addEventListener('play', () => cover.remove(), { once: true });
+    playerWrap.append(cover);
+  }
   viewerUI = { captureBtn, imageBtn, playerWrap };
   // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
   const playerState = el('span', { className: 'time' }); // ⏸/▶ 와 현재 시간 / 전체 길이
@@ -1020,7 +1137,7 @@ function openViewer(f) {
       canCapture ? captureBtn : null,
       imageBtn,
       el('button', { className: 'edit-only', textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
-      canFullscreen || iframe.tagName === 'VIDEO' ? el('button', { textContent: '⛶ 전체화면', onclick: () => fullscreen(iframe) }) : null,
+      canFullscreen || iframe.tagName === 'VIDEO' ? el('button', { textContent: '⛶ 전체화면', onclick: () => videoFullscreen(iframe) }) : null,
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     tagBox(f),
@@ -1244,22 +1361,26 @@ async function convertBrackets(list) {
     if (merged.length) { gallery.tags[f.id] = merged; pendingSaves.set('t:' + f.id, merged); }
   }
   flushSaves();
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, firstError = '';
   for (const f of list) {
     const { name } = splitBrackets(f.name);
     setStatus(`제목 정리 중… ${done + failed + 1}/${list.length}`);
     if (name === f.name) { done++; continue; }
     try {
-      await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      // 드라이브가 실제로 바꾼 이름을 돌려받아 확인
+      const r = await (await api(`${DRIVE}/files/${f.id}?fields=name`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })).json();
+      if (r.name !== name) throw new Error(`드라이브 이름이 "${r.name}" 그대로예요`);
       f.name = name;
       done++;
     } catch (e) {
       if (e instanceof AuthError) { renderGrid(); return handleError(e); }
       failed++;
+      firstError = firstError || `"${f.name}": ${e.message}`;
     }
   }
   renderGrid();
-  setStatus(failed ? `제목 정리: ${done}개 완료, ${failed}개는 이름을 못 바꿨어요(태그는 붙음).` : `제목 정리 완료: ${done}개 (태그로 옮기고 [ ] 를 뺐어요).`, !!failed);
+  setStatus(failed ? `제목 정리: ${done}개 완료, ${failed}개는 이름을 못 바꿨어요(태그는 붙음). 첫 실패 — ${firstError}`
+    : `제목 정리 완료: ${done}개 (태그로 옮기고 [ ] 를 뺐어요).`, !!failed);
 }
 
 // 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
@@ -1625,7 +1746,9 @@ async function previewImage(f, blob, btn) {
 }
 
 function showPreviewMessage(text) {
-  $('#preview').replaceChildren(el('p', { className: 'hint', textContent: text }));
+  // 영상 창이 닫혀 있으면(☰ 메뉴의 제목 정리 등) 위쪽 상태 줄에
+  if ($('#preview')) $('#preview').replaceChildren(el('p', { className: 'hint', textContent: text }));
+  else setStatus(text, true);
 }
 
 // 영상 둘레의 검은 여백(세로 영상 양옆 등)을 뺀 실제 영상 영역 {x, y, w, h}. 못 찾으면 전체.
