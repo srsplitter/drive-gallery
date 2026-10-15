@@ -389,7 +389,7 @@ function scrollToNextTodo() {
 
 function renderGrid() {
   $('#grid').replaceChildren(...items.map(f => f.mimeType === 'application/vnd.google-apps.folder' ? folderCard(f) : videoCard(f)));
-  prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 2개"가 바뀜
+  prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
 
 function folderCard(f) {
@@ -704,7 +704,7 @@ function getMp4(f) {
 
 // ---------- 대표 장면 5개 (영상 길이의 25·33·50·66·75%) ----------
 // 드라이브 영상 파일에서 직접 뽑는다(그 지점 근처만 받음). 보고 있는 플레이어는 건드리지 않음.
-// 수정 ON 이면 지금 폴더 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개를 미리 뽑아 두고,
+// 수정 ON 이면 지금 폴더 순서에서 아직 썸네일을 안 정한 앞쪽 영상 10개를 미리 뽑아 두고,
 // 영상 창을 열면 뽑아 둔 것(또는 뽑히는 대로)을 보여준다. 누르면 그 장면으로 바로 적용(창 닫힘, 저장은 뒤에서).
 const CAND_POINTS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75];
 const candJobs = new Map(); // 영상 ID → { f, status, dur, shots[], subs, ac }
@@ -817,10 +817,12 @@ async function extractViaHiddenPlayer(j) {
   }
 }
 
-// 수정 ON 일 때: 지금 폴더의 정렬 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개(+지금 연 영상)만 남기고 미리 뽑기
+// 수정 ON 일 때: 지금 폴더의 정렬 순서에서 아직 썸네일을 안 정한 앞쪽 영상 10개(+지금 연 영상)만 남기고 미리 뽑기
+// (한 번에 한 영상씩 순서대로, 지금 연 영상이 기다리고 있으면 그것부터)
+const PREFETCH_COUNT = 10;
 function prefetchCandidates() {
   if (!document.body.classList.contains('editing') || !token) return;
-  const todo = items.filter(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]).slice(0, 2);
+  const todo = items.filter(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]).slice(0, PREFETCH_COUNT);
   const keep = new Set(todo.map(x => x.id));
   if (viewer.open && viewerFile) keep.add(viewerFile.id);
   for (const [id, j] of candJobs) {
