@@ -119,7 +119,7 @@ const root = path.resolve(__dirname, '..');
       assert.equal(await other.inputValue(),'미전송');
     }
     const colors=await page.evaluate(()=>{
-      gallery.tags={a:['카테고리색','캐릭터색','일반색']}; gallery.tagKinds={'카테고리색':'category','캐릭터색':'character'};
+      gallery.tags={a:['카테고리색','캐릭터색','일반색','장르색']}; gallery.tagKinds={'카테고리색':'category','캐릭터색':'character','장르색':'genre'};
       currentView='';renderGrid();
       const wrap=document.createElement('div');document.body.append(wrap);
       const style=n=>{const s=getComputedStyle(n);return {border:s.borderColor,bg:s.backgroundColor,color:s.color};};
@@ -129,9 +129,12 @@ const root = path.resolve(__dirname, '..');
     });
     assert.equal(colors.pills[0].border,'rgb(255, 79, 154)');
     assert.equal(colors.pills[1].border,'rgb(87, 184, 120)');
+    assert.equal(colors.pills[3].border,'rgb(255, 197, 49)');
+    assert.equal(colors.pills[3].bg,colors.pills[2].bg);assert.equal(colors.pills[3].color,colors.pills[2].color);
     assert.equal(colors.pills[0].bg,colors.pills[2].bg);assert.equal(colors.pills[1].color,colors.pills[2].color);
     assert.ok(colors.chips.some(s=>s.border==='rgb(255, 79, 154)'));
     assert.ok(colors.chips.some(s=>s.border==='rgb(87, 184, 120)'));
+    assert.ok(colors.chips.some(s=>s.border==='rgb(255, 197, 49)'));
     const chipOrder=await page.evaluate(()=>{
       gallery.tags={a:['일반','모험','게임','마리오','루이지'],b:['일반','게임','루이지'],c:['일반']};
       gallery.tagKinds={모험:'genre',게임:'category',마리오:'character',루이지:'character'};
