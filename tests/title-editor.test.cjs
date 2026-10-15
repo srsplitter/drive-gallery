@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {planRename,removeWords}=require('../title-editor.js');
+const {planRename,removeWords,matchesKinds}=require('../title-editor.js');
 test('number only the supplied visible order and preserve extensions',()=>{
   const files=[{id:'c',name:'old.MOV'},{id:'a',name:'other.mp4'}];
   assert.deepEqual(planRename(files,'마리오').map(p=>[p.file.id,p.name]),[['c','마리오1.MOV'],['a','마리오2.mp4']]);
@@ -23,4 +23,10 @@ test('explicit dotted suffix removes extension only on exact match',()=>{
   assert.equal(removeWords('Mario clip.mp4','Mario, .mp4'),'clip');
   assert.equal(removeWords('clip.mov','.mp4'),'clip.mov');
   assert.equal(removeWords('.mp4','.mp4'),null);
+});
+test('kind searches match only their own taxonomy and combine with series',()=>{
+  const file={id:'a'},data={tags:{a:['Mario','게임']},tagKinds:{Mario:'character',게임:'category'},series:{s:{name:'Mario 연작',videoIds:['a']}}};
+  assert.equal(matchesKinds(file,{normal:'mario'},data),false);
+  assert.equal(matchesKinds(file,{character:'mario',category:'게임',series:'연작'},data),true);
+  assert.equal(matchesKinds(file,{character:'mario',genre:'게임'},data),false);
 });

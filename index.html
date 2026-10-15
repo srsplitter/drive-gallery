@@ -293,8 +293,14 @@
 .card.order-after { box-shadow: 5px 0 0 #e5b94c; }
   .directory-item { min-width: 0; max-width: 100%; }
   .tag-directory { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; align-items: start; }
-  .tag-directory > .directory-item > .pill { width: 100%; height: 58px; min-width: 0; }
-  .tag-directory .directory-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  .tag-directory > .directory-item > .pill { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: 45px 22px 20px; gap: 4px; justify-items: center; width: 100%; height: 115px; min-width: 0; padding: 6px 8px; border-radius: 12px; }
+  .tag-directory .pill > .cover-thumb { grid-column: 1 / -1; grid-row: 1; }
+  .tag-directory .directory-name { grid-column: 1 / -1; grid-row: 2; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+  .tag-directory .star { grid-column: 1; grid-row: 3; }
+  .tag-directory .cnt { grid-column: 2; grid-row: 3; }
+  .tag-directory .pen { grid-column: 3; grid-row: 3; }
+  .tag-directory .bin { grid-column: 4; grid-row: 3; }
+  body:not(.editing) .tag-directory .cnt { grid-column: 1 / -1; }
   .tag-directory .star, .tag-directory .cnt, .tag-directory .pen, .tag-directory .bin { flex: none; }
   .directory-cover-row { grid-column: 1 / -1; min-width: 0; }
   .directory-cover-row .cover-candidates { max-width: 100%; }
@@ -309,6 +315,9 @@
   .title-memos textarea { min-height: 94px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); color: var(--text); font: inherit; }
   .title-memos label { display: block; margin-bottom: 8px; }
   .title-memos button { margin: 0 6px 6px 0; }
+  .title-kind-search { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 10px; margin: 16px 0; }
+  .title-kind-search label { margin: 0; min-width: 0; }
+  .title-kind-search input { display: block; width: 100%; min-width: 0; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; }
   body.editing #titleEditor .card .name { cursor: pointer; }
   body.editing #titleEditor .card .name:hover { text-decoration: none; }
   .catscroll > [hidden] { display: none !important; }

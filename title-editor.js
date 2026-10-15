@@ -29,10 +29,25 @@
     return next ? next + (removeExtension ? '' : extension) : null;
   }
 
+  const kindLabels = { normal: '태그', category: '카테고리', genre: '장르', character: '캐릭터', series: '시리즈' };
+  const queries = { normal: '', category: '', genre: '', character: '', series: '' };
+  function matchesKinds(file, queries, data) {
+    return Object.keys(kindLabels).every(kind => {
+      const query = String(queries[kind] || '').trim().toLowerCase();
+      if (!query) return true;
+      if (kind === 'series') return Object.values(data.series || {}).some(series =>
+        series && Array.isArray(series.videoIds) && series.videoIds.includes(file.id)
+        && String(series.name || '').toLowerCase().includes(query));
+      return ((data.tags || {})[file.id] || []).some(tag =>
+        (((data.tagKinds || {})[tag] || 'normal') === kind) && tag.toLowerCase().includes(query));
+    });
+  }
   const excluded = new Set();
+  let searchTimer;
   let shown = [], busy = false, memoWrap, baseInput, wordsInput, renameButton, removeButton;
   let preview, status, excludedBadge, resetButton, clearButtons = [];
-  const filter = list => list.filter(file => !excluded.has(file.id));
+  const filter = list => list.filter(file => !excluded.has(file.id)
+    && matchesKinds(file, queries, typeof gallery === 'undefined' ? {} : gallery));
   const editing = () => document.body.classList.contains('editing');
   function clearExcluded() {
     excluded.clear();
@@ -164,6 +179,33 @@
     const columns = node('div');
     columns.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px';
     columns.append(left.box, right.box);
+    const searches = node('div', '', 'title-kind-search');
+    const searchInputs = [];
+    for (const [kind, title] of Object.entries(kindLabels)) {
+      const label = node('label', title);
+      const input = node('input');
+      input.type = 'text';
+      input.value = queries[kind];
+      input.placeholder = `${title} 검색`;
+      input.setAttribute('aria-label', `${title}로 동영상 검색`);
+      input.addEventListener('input', () => {
+        queries[kind] = input.value;
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => renderGrid(), 150);
+      });
+      label.append(input);
+      searches.append(label);
+      searchInputs.push(input);
+    }
+    const clearSearch = node('button', '분류 검색 초기화', 'chip');
+    clearSearch.type = 'button';
+    clearSearch.setAttribute('aria-label', '분류 검색 초기화');
+    clearSearch.addEventListener('click', () => {
+      clearTimeout(searchTimer);
+      for (const kind of Object.keys(queries)) queries[kind] = '';
+      for (const input of searchInputs) input.value = '';
+      renderGrid();
+    });
     for (const input of [baseInput, wordsInput]) input.style.cssText = 'display:block;width:100%;box-sizing:border-box';
     preview = node('p', '', 'hint');
     status = node('p', '', 'hint');
@@ -173,7 +215,7 @@
     resetButton = node('button', '제목 편집 제외 초기화', 'chip');
     resetButton.type = 'button';
     resetButton.addEventListener('click', () => { clearExcluded(); renderGrid(); });
-    memoWrap.append(notice, columns, preview, excludedBadge, resetButton, status);
+    memoWrap.append(notice, columns, searches, clearSearch, preview, excludedBadge, resetButton, status);
     updateControls();
     return memoWrap;
   }
@@ -181,7 +223,7 @@
     shown = list.slice();
     const active = document.activeElement;
     const focused = memoWrap && memoWrap.contains(active) ? active : null;
-    const selection = focused && focused.tagName === 'TEXTAREA'
+    const selection = focused && (focused.tagName === 'TEXTAREA' || focused.tagName === 'INPUT')
       ? [focused.selectionStart, focused.selectionEnd, focused.selectionDirection] : null;
     const wrapper = node('div');
     wrapper.id = 'titleEditor';
@@ -210,7 +252,7 @@
     });
     return wrapper;
   }
-  const exported = { planRename, removeWords, renderMemos, clearExcluded, filter, render };
+  const exported = { planRename, removeWords, matchesKinds, renderMemos, clearExcluded, filter, render };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   else root.TitleEditor = exported;
 })(globalThis);
