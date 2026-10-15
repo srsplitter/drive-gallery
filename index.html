@@ -57,6 +57,12 @@
     transform: translateX(-102%); transition: transform .22s ease; box-shadow: 8px 0 24px rgba(0,0,0,.45); }
   #menu:not([open]) { display: none; }
   #menu.in { transform: none; }
+  /* PC: 패널이 열리면 그 폭만큼 목록·카테고리 바를 오른쪽으로 밀어 가려지는 영상이 없게 */
+  main, #catbar { transition: margin-left .22s ease, padding-left .22s ease; }
+  body.menu-push main { margin-left: 360px; }
+  body.menu-push #catbar { padding-left: 360px; }
+  body.menu-push #menuBtn { left: 376px; } /* ☰ 도 패널 옆으로 비켜서 다시 눌러 닫을 수 있게 */
+  #menuBtn { transition: left .22s ease; }
   #menu .v-head { flex: none; }
   #menu .m-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   #menu::backdrop { background: transparent; }
@@ -607,12 +613,15 @@ function openMenu() {
   if (!menu.open) phoneMenu() ? menu.showModal() : menu.show(); // PC 는 어둡게 깔지 않고 뒤 목록도 그대로 쓸 수 있게
   void menu.offsetWidth; // 열린 상태를 먼저 그려야 밀려 나오는 움직임이 보임
   menu.classList.add('in');
+  document.body.classList.toggle('menu-push', !phoneMenu());
 }
 function closeMenu() {
   menu.classList.remove('in');
+  document.body.classList.remove('menu-push');
   setTimeout(() => { if (!menu.classList.contains('in')) menu.close(); }, 230);
 }
-menu.addEventListener('close', () => menu.classList.remove('in'));
+// close 이벤트는 늦게 오므로, 그사이 다시 열렸으면 건드리지 않음
+menu.addEventListener('close', () => { if (!menu.open) { menu.classList.remove('in'); document.body.classList.remove('menu-push'); } });
 $('#menuClose').onclick = closeMenu;
 $('#menuReset').onclick = () => { menuDraft = null; filters = EMPTY_FILTERS(); renderGrid(); renderMenu(); };
 menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); }); // 폰: 바깥(어두운 곳) 누르면 닫힘
