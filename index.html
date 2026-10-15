@@ -664,13 +664,25 @@ async function extShot(iframe) {
 
 // ---------- 영상 파일 색인(moov) 캐시 — 대표 장면·시간 조절바 미리보기가 같이 씀 ----------
 const mp4s = new Map(); // 영상 ID → Promise<src | null(못 푸는 형식)>
+const mp4Reasons = new Map(); // 영상 ID → 직접 뽑을 수 없는 이유 (화면에 표시)
+const CODEC_NAMES = { hvc1: 'HEVC/H.265', hev1: 'HEVC/H.265', avc1: 'H.264', avc3: 'H.264', av01: 'AV1', vp09: 'VP9' };
 function getMp4(f) {
   if (!mp4s.has(f.id)) {
     const size = +f.size || 0;
-    const ok = size && 'VideoDecoder' in window && /mp4|quicktime|m4v|3gpp/.test(f.mimeType);
-    const p = !ok ? Promise.resolve(null) : openMp4(f.id, size, new AbortController().signal)
-      .then(s => s && !s.unsupported ? s : null)
-      .catch(e => { mp4s.delete(f.id); if (e instanceof AuthError) throw e; return null; });
+    const fail = reason => { mp4Reasons.set(f.id, reason); return null; };
+    let p;
+    if (!('VideoDecoder' in window)) p = Promise.resolve(fail('이 브라우저는 영상을 직접 풀지 못해요(WebCodecs 없음). PC 크롬·엣지에서 써 주세요.'));
+    else if (!size || !/mp4|quicktime|m4v|3gpp/.test(f.mimeType)) p = Promise.resolve(fail(`자동으로 못 뽑는 형식이에요(${f.mimeType}).`));
+    else p = openMp4(f.id, size, new AbortController().signal)
+      .then(s => {
+        if (!s) return fail('파일에 영상 트랙이 없어요.');
+        if (s.unsupported) {
+          const tag = String(s.codec || '').split('.')[0];
+          return fail(`이 브라우저가 이 영상 코덱(${CODEC_NAMES[tag] || s.codec})을 못 풀어요.`);
+        }
+        return s;
+      })
+      .catch(e => { mp4s.delete(f.id); if (e instanceof AuthError) throw e; return fail('파일을 읽다 실패했어요: ' + e.message); });
     mp4s.set(f.id, p);
     if (mp4s.size > 8) mp4s.delete(mp4s.keys().next().value);
   }
@@ -712,6 +724,7 @@ async function runCandJobs() {
       } catch (e) {
         if (e instanceof AuthError) { j.status = 'queued'; notifyCand(j); break; } // 다시 로그인하면 이어서
         j.status = j.ac.signal.aborted ? 'aborted' : 'unsupported';
+        if (!j.reason) j.reason = '오류가 났어요: ' + (e.message || e);
       }
       notifyCand(j);
     }
@@ -722,10 +735,9 @@ async function runCandJobs() {
 
 // 이 브라우저가 풀 수 없는 형식이면 false
 async function extractCandidates(j) {
-  const { f } = j, size = +f.size || 0, signal = j.ac.signal;
-  if (!size || !('VideoDecoder' in window) || !/mp4|quicktime|m4v|3gpp/.test(f.mimeType)) return false;
+  const { f } = j, signal = j.ac.signal;
   const src = await getMp4(f);
-  if (!src) return false;
+  if (!src) { j.reason = mp4Reasons.get(f.id); return false; }
   j.dur = src.duration;
   notifyCand(j);
   let made = 0;
@@ -743,6 +755,7 @@ async function extractCandidates(j) {
     } catch (e) {
       if (signal.aborted || e instanceof AuthError) throw e;
       j.shots[i] = 'fail';
+      j.reason = '장면을 풀다 실패했어요: ' + (e.message || e);
     }
     notifyCand(j);
   }
@@ -801,7 +814,7 @@ function showCandidates(f, iframe, box, captureBtn) {
       return box.replaceChildren(
         el('button', { className: 'ext-only', textContent: '🎞️ 플레이어로 대표 장면 뽑기 (플레이어가 3~4초 움직여요)',
           onclick: () => candidatesFromPlayer(f, iframe, box, captureBtn) }),
-        el('p', { className: 'hint no-ext-only', textContent: '이 영상 형식은 대표 장면을 자동으로 뽑을 수 없어요.' }));
+        el('p', { className: 'hint', textContent: '대표 장면을 자동으로 못 뽑았어요 — ' + (j.reason || '이유를 알 수 없어요.') }));
     }
     if (!j.dur) {
       return box.replaceChildren(el('p', { className: 'hint', textContent: j.status === 'queued' ? '대표 장면: 앞 영상 다음 차례예요…' : '대표 장면 뽑는 중…' }));
@@ -1144,7 +1157,7 @@ async function openMp4(id, size, signal) {
   if (!track) return null;
   const trak = mp4.getTrackById(track.id);
   const config = { codec: track.codec, codedWidth: track.video.width, codedHeight: track.video.height, description: decoderDescription(trak) };
-  if (!(await VideoDecoder.isConfigSupported(config)).supported) return { unsupported: true };
+  if (!(await VideoDecoder.isConfigSupported(config)).supported) return { unsupported: true, codec: track.codec };
   const m = track.matrix; // 폰 세로 영상 등의 회전 정보
   const rotation = (Math.round(Math.atan2(m[1], m[0]) * 180 / Math.PI) + 360) % 360;
   return { id, config, rotation, samples: trak.samples, timescale: track.timescale,
