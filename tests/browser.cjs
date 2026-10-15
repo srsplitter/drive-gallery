@@ -124,6 +124,23 @@ const root = path.resolve(__dirname, '..');
     assert.equal(colors.pills[0].bg,colors.pills[2].bg);assert.equal(colors.pills[1].color,colors.pills[2].color);
     assert.ok(colors.chips.some(s=>s.border==='rgb(255, 79, 154)'));
     assert.ok(colors.chips.some(s=>s.border==='rgb(87, 184, 120)'));
+    await page.setViewportSize({width:1280,height:900});
+    await page.evaluate(()=>{
+      const thumb=(w,h,color)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,w,h);return {thumb:c.toDataURL(),at:'test'};};
+      gallery.videos={a:thumb(180,480,'#385c9f'),b:thumb(480,180,'#40663c'),c:thumb(320,320,'#956849')};
+      gallery.tags={a:['짧은태그'],b:Array.from({length:12},(_,i)=>'아주긴태그'+i),c:[]};
+      gallery.loved={a:true};gallery.marks={b:'star',c:'square'};
+      items=items.filter(f=>['a','b','c'].includes(f.id));
+      currentView='';filters=EMPTY_FILTERS();query='';setEditMode(false);renderGrid();
+    });
+    await page.locator('#grid .thumb img').evaluateAll(ns=>Promise.all(ns.map(n=>n.decode())));
+    const boxes=await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>{
+      const c=n.getBoundingClientRect(),t=n.querySelector('.thumb').getBoundingClientRect();
+      return {top:t.top,width:t.width,height:t.height,gap:t.top-c.top,fit:getComputedStyle(n.querySelector('img')).objectFit};
+    }));
+    for(const box of boxes){assert.ok(Math.abs(box.top-boxes[0].top)<1);assert.ok(Math.abs(box.height-boxes[0].height)<1);assert.ok(box.gap<=1.1);assert.ok(Math.abs(box.width/box.height-16/9)<0.01);assert.equal(box.fit,'cover');}
+    await page.waitForTimeout(300); // 썸네일 표시 전환이 끝난 뒤 시각 확인
+    await page.screenshot({path:path.join(root,'tests','thumb-layout.png'),fullPage:true});
     assert.deepEqual(errors, []);
     console.log('PASS directories, edit gating, transfer, search, marks, mobile layout, persistence maps, memo repeated entry/focus/drafts, border-only kind colors, no runtime errors');
   } finally { await browser.close(); }
