@@ -66,6 +66,16 @@
     baseInput.disabled = wordsInput.disabled = busy;
     for (const button of clearButtons) button.disabled = busy;
   }
+  function updateProgress(label, total, success, failed, detail = '') {
+    const processed = success + failed;
+    const message = `${label} ${processed}/${total} (${Math.floor(processed / total * 100)}%) · 성공 ${success} · 실패 ${failed}` + (detail ? ` · ${detail}` : '');
+    status.textContent = message;
+    const header = document.getElementById('titleProgress');
+    if (header) {
+      header.textContent = message;
+      header.hidden = false;
+    }
+  }
   async function apply(kind) {
     if (busy) return;
     // Snapshot the current displayed order and exclusions before any request.
@@ -76,12 +86,13 @@
     busy = true;
     updateControls();
     let success = 0, failed = 0, lastError = '', stopped = '';
-    status.textContent = `Google Drive 파일명 변경 중 · ${plans.length}개`;
+    updateProgress('권한 확인 중', plans.length, success, failed);
     try {
       if (!await ensureWriteScope()) {
         stopped = 'Google Drive 수정 권한을 받지 못해 취소했어요. 변경된 파일은 없습니다.';
         return;
       }
+      updateProgress('제목 변경 중', plans.length, success, failed);
       for (const { file, name } of plans) {
         try {
           const response = await api(`${DRIVE}/files/${encodeURIComponent(file.id)}`, {
@@ -93,13 +104,16 @@
         } catch (error) {
           failed++;
           lastError = error.message || String(error);
+        } finally {
+          updateProgress('제목 변경 중', plans.length, success, failed);
         }
       }
     } catch (error) {
       stopped = `Google Drive 수정 권한 확인 실패: ${error.message || String(error)} · 변경된 파일은 없습니다.`;
     } finally {
       busy = false;
-      status.textContent = stopped || `Google Drive 파일명 변경: 성공 ${success}개 · 실패 ${failed}개 · 빈 이름 건너뜀 ${removal.skipped.length}개` + (lastError ? ` · ${lastError}` : '');
+      updateProgress(stopped ? '제목 변경 취소' : '제목 변경 완료', plans.length, success, failed,
+        `빈 이름 건너뜀 ${removal.skipped.length}개` + (stopped ? ` · ${stopped}` : '') + (lastError ? ` · ${lastError}` : ''));
       updateControls();
       renderGrid();
     }

@@ -306,6 +306,8 @@
   body.editing #titleEditor .card .name { cursor: pointer; }
   body.editing #titleEditor .card .name:hover { text-decoration: none; }
   .catscroll > [hidden] { display: none !important; }
+  #titleProgress { color: var(--dim); font-size: 12px; max-width: 420px; overflow-wrap: anywhere; }
+  @media (max-width: 640px) { #titleProgress:not([hidden]) { flex-basis: 100%; order: 1; max-width: none; } }
 </style>
 </head>
 <body>
@@ -313,6 +315,7 @@
   <h1>🎬 영상 갤러리</h1>
   <div id="crumbs"></div>
   <span id="saveState"></span>
+  <span id="titleProgress" role="status" aria-live="polite" hidden></span>
   <button id="pauseBtn" class="edit-only ext-only" title="수정 ON 에서 영상을 재생하면 바로 멈추기"></button>
   <span class="edit-wrap"><button id="editBtn" hidden></button><div id="editNote" hidden></div></span>
   <button id="authBtn" hidden></button>
