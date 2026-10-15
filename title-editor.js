@@ -18,12 +18,15 @@
   }
   function removeWords(name, input) {
     const [base, extension] = splitName(name);
-    const words = new Set((String(input).match(/[\p{L}\p{N}\p{M}_]+/gu) || [])
+    const tokens = String(input).split(/[,\s]+/u);
+    const extensionTokens = tokens.filter(token => /^\.[^.]+$/u.test(token));
+    const removeExtension = extensionTokens.some(token => token.toLowerCase() === extension.toLowerCase());
+    const words = new Set((tokens.filter(token => !extensionTokens.includes(token)).join(' ').match(/[\p{L}\p{N}\p{M}_]+/gu) || [])
       .map(word => word.toLowerCase()));
-    if (!words.size) return String(name);
+    if (!words.size && !removeExtension) return String(name);
     const next = base.replace(/[\p{L}\p{N}\p{M}_]+/gu,
       word => words.has(word.toLowerCase()) ? '' : word).replace(/\s+/g, ' ').trim();
-    return next ? next + extension : null;
+    return next ? next + (removeExtension ? '' : extension) : null;
   }
 
   const excluded = new Set();
@@ -140,7 +143,7 @@
     memoWrap = node('div', '', 'title-memos');
     const notice = node('p', '아래 작업은 Google Drive의 실제 파일명을 변경합니다. 수정 OFF에서도 실행됩니다.', 'hint');
     const left = memo('일괄 이름 변경', '예: 마리오 → 마리오1.mp4, 마리오2.mp4', 'Google Drive 이름 변경', 'rename');
-    const right = memo('완전한 단어 제거', '쉼표·줄바꿈·공백으로 단어 구분', 'Google Drive 단어 제거', 'remove');
+    const right = memo('완전한 단어 제거', '쉼표·줄바꿈·공백 구분 · .mp4 입력 시 확장자 제거', 'Google Drive 단어 제거', 'remove');
     baseInput = left.input; renameButton = left.button;
     wordsInput = right.input; removeButton = right.button;
     clearButtons = [left.clear, right.clear];

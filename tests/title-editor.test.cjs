@@ -14,3 +14,13 @@ test('remove exact Unicode words without stripping prefixes',()=>{
   assert.equal(removeWords('Mario,마리오 sequel.MOV','Mario 마리오'),', sequel.MOV');
   assert.equal(removeWords('마리오.mp4','마리오'),null);
 });
+test('explicit dotted suffix removes extension only on exact match',()=>{
+  assert.equal(removeWords('Mario.mp4','.mp4'),'Mario');
+  assert.equal(removeWords('Mario.MP4','.mp4'),'Mario');
+  assert.equal(removeWords('Mario.mp4','.mp'),'Mario.mp4');
+  assert.equal(removeWords('Mario.mp4','mp4'),'Mario.mp4');
+  assert.equal(removeWords('mp4 clip.mp4','.mp4'),'mp4 clip');
+  assert.equal(removeWords('Mario clip.mp4','Mario, .mp4'),'clip');
+  assert.equal(removeWords('clip.mov','.mp4'),'clip.mov');
+  assert.equal(removeWords('.mp4','.mp4'),null);
+});
