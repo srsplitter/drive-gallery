@@ -286,6 +286,10 @@
   input[type=range] { width: 100%; accent-color: var(--accent); }
   .time-input { width: 96px; text-align: center; padding: 8px; border-radius: 10px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; }
+.editing .card[draggable="true"] { cursor: grab; }
+.card.order-dragging { opacity: .45; }
+.card.order-before { box-shadow: -5px 0 0 #e5b94c; }
+.card.order-after { box-shadow: 5px 0 0 #e5b94c; }
 </style>
 </head>
 <body>
@@ -340,6 +344,7 @@
 </dialog>
 
 <script src="gallery-order.js"></script>
+<script src="manual-order.js"></script>
 <script src="series.js"></script>
 <script src="series-ui.js"></script>
 <script>
@@ -545,7 +550,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -574,16 +579,16 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
     const [map, id] = m ? [data[m], key.slice(2)] : [data.videos, key];
-    if (val) map[id] = val; else delete map[id];
+    if (val || (m === 'order' && val === 0)) map[id] = val; else delete map[id];
   }
 }
 
@@ -1213,6 +1218,7 @@ function renderGrid() {
   const counts = tagCounts();
   const filtered = visible.filter(f => (currentView === 'series' || !query || f.name.toLowerCase().includes(query)) && matchesFilters(f));
   shown = window.GalleryOrder.sortVideos(filtered, { ...gallery, loved: {} }, items);
+  shown = ManualOrderUI.sorted(shown, 'regular');
   if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
   shown = window.GallerySeries.arrange(shown, gallery.series);
   $('#bulkTag').hidden = !!currentView;
@@ -1222,14 +1228,18 @@ function renderGrid() {
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
-    const favorites = !SeriesUI.mode ? shown.filter(isLoved) : [];
+    const favorites = !SeriesUI.mode ? ManualOrderUI.sorted(shown.filter(isLoved), 'favorites') : [];
     if (favorites.length) {
       const section = el('section', { id: 'favoriteVideos' },
         el('h2', { textContent: '즐겨찾기' }),
         el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts))));
       $('#grid').replaceChildren(section, el('hr'), regular);
     } else $('#grid').replaceChildren(regular);
+    ManualOrderUI.bind();
   }
+  if (!currentView && !SeriesUI.mode) $('#crumbs').append(el('button', {
+    className: 'edit-only small', textContent: '자동 정렬로 복원', onclick: ManualOrderUI.restore
+  }));
   if (currentView) setStatus('');
   else if (query && !shown.length) setStatus('검색어가 들어간 파일이 없어요.');
   else if (nf && !shown.length) setStatus('조건에 맞는 영상이 없어요.');
@@ -1397,7 +1407,7 @@ function videoCard(f, counts = tagCounts()) {
     if (document.body.classList.contains('editing') && inName && e.detail !== 0) return startCardRename(f, nameEl);
     open();
   };
-  const card = el('button', { className: 'card', onclick: onCard },
+  const card = el('button', { className: 'card', draggable: false, onclick: onCard },
     thumb, nameEl,
     tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t), textContent: t }))) : null, // PC: 이 영상의 태그
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
