@@ -50,7 +50,7 @@ async function capture(tab) {
 async function player(tab, action, delta) {
   const frames = (await inFrames(tab, framePlayer, [action, delta])).map((r) => r.result).filter(Boolean);
   const hit = frames.find((r) => r.acted);
-  if (hit) return { ok: true, paused: hit.paused, time: hit.time };
+  if (hit) return { ok: true, paused: hit.paused, time: hit.time, duration: hit.duration };
   const seen = frames.map((r) => `${r.where}(영상 ${r.videos})`).join(', ') || '하위 프레임 없음';
   return { ok: false, error: `플레이어 영상을 찾지 못했어요. 찾아본 프레임: ${seen}` };
 }
@@ -104,10 +104,11 @@ function framePlayer(action, delta) {
   if (action === 'toggle') {
     // ⏯ 로 재생하는 건 자동 멈춤(autopause.js)에서 제외
     if (v.paused) { window.__dgUserPlay = true; v.play().catch(() => {}); } else v.pause();
-  } else if (action === 'seek') {
+  } else if (action === 'seek' || action === 'seekTo') { // seek: 상대 이동, seekTo: 그 시각으로
     v.pause();
     const end = Number.isFinite(v.duration) ? v.duration : Infinity;
-    v.currentTime = Math.min(Math.max(0, v.currentTime + delta), end);
-  }
-  return { where, videos: found.length, acted: true, paused: v.paused, time: v.currentTime };
+    v.currentTime = Math.min(Math.max(0, action === 'seek' ? v.currentTime + delta : delta), end);
+  } // action === 'state': 상태만 알려줌
+  return { where, videos: found.length, acted: true, paused: v.paused, time: v.currentTime,
+    duration: Number.isFinite(v.duration) ? v.duration : 0 };
 }

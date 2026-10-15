@@ -48,6 +48,7 @@
   #editNote[hidden] { display: none; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
+  .seek-bar { flex: 1; accent-color: var(--accent); }
   .cropper { position: absolute; inset: 0; overflow: hidden; background: #000; border-radius: 8px; touch-action: none; }
   .cropper canvas { position: absolute; }
   .crop-box { position: absolute; box-sizing: border-box; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); cursor: move; }
@@ -327,8 +328,11 @@ const viewer = $('#viewer');
 let viewerAbort = null;
 let viewerUI = null; // 지금 열린 영상 창의 { captureBtn, imageBtn }
 
+let viewerPoll = null; // 시간 조절바 갱신 타이머
+
 function closeViewerResources() {
   if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
+  clearInterval(viewerPoll);
   restorePending = null;
   // 스트리밍 중인 영상의 추가 다운로드 중단
   for (const v of $('#vBody').querySelectorAll('video')) { v.removeAttribute('src'); v.load(); }
@@ -374,13 +378,35 @@ function openViewer(f) {
   const playerWrap = el('div', { className: 'player-wrap' }, iframe); // 영역 조절기가 이 위에 겹쳐 뜸
   viewerUI = { captureBtn, imageBtn, playerWrap };
   // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
-  const playerState = el('span', { className: 'time' }); // 조작 후 ⏸/▶ 와 현재 시간
+  const playerState = el('span', { className: 'time' }); // ⏸/▶ 와 현재 시간 / 전체 길이
+  // 항상 보이는 시간 조절바 (드라이브 플레이어 조절바는 숨었다 나왔다 하므로)
+  const seekBar = el('input', { type: 'range', min: 0, max: 0, step: 0.1, value: 0, disabled: true, className: 'seek-bar' });
+  let dragging = false, seekTimer = null;
+  const showState = r => {
+    if (r.duration) { seekBar.max = r.duration; seekBar.disabled = false; }
+    if (!dragging) seekBar.value = r.time;
+    playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time) + (r.duration ? ' / ' + fmtTime(r.duration) : '');
+  };
   const pc = (label, action, delta) => el('button', { textContent: label,
     onclick: () => extCall('player', { action, delta })
-      .then(r => { playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time); $('#preview').replaceChildren(); })
+      .then(r => { showState(r); $('#preview').replaceChildren(); })
       .catch(e => showPreviewMessage(e.message)) });
+  const seekTo = () => extCall('player', { action: 'seekTo', delta: +seekBar.value }).then(showState).catch(() => {});
+  seekBar.oninput = () => {
+    dragging = true;
+    playerState.textContent = '⏸ ' + fmtTenth(+seekBar.value);
+    if (!seekTimer) seekTimer = setTimeout(() => { seekTimer = null; seekTo(); }, 120); // 끄는 동안 0.12초마다 이동
+  };
+  seekBar.onchange = () => { dragging = false; clearTimeout(seekTimer); seekTimer = null; seekTo(); };
+  // 영상이 재생되면서 움직이는 시간을 1초마다 반영 (수정 모드 + 확장 있을 때만)
+  viewerPoll = setInterval(() => {
+    if (!dragging && viewer.open && document.body.classList.contains('editing') && extReady) {
+      extCall('player', { action: 'state' }).then(showState).catch(() => {});
+    }
+  }, 1000);
   $('#vBody').replaceChildren(
     playerWrap,
+    el('div', { className: 'row edit-only ext-only' }, seekBar),
     el('div', { className: 'row edit-only ext-only' },
       pc('⏯ 재생/멈춤', 'toggle'), pc('-1초', 'seek', -1), pc('-1프레임', 'seek', -1 / 30),
       pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1), playerState),

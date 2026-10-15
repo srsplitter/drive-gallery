@@ -11,10 +11,13 @@ if (window !== window.top && ancestors && ancestors.length && ancestors[ancestor
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'autoPause') on = !!msg.on;
   });
-  // 미디어 이벤트는 버블링되지 않으므로 캡처 단계에서 받음
-  document.addEventListener('play', (e) => {
-    if (!on || window.__dgUserPlay || !(e.target instanceof HTMLMediaElement)) return;
-    e.target.pause();
+  // 미디어 이벤트는 버블링되지 않으므로 캡처 단계에서 받음.
+  // 재생 직후 바로 멈추면 플레이어가 "시작 전" 화면(시간 조절바 없음)에 머물러서,
+  // 실제 재생이 시작된 뒤 잠깐(0.3초) 있다가 멈춘다.
+  document.addEventListener('playing', (e) => {
+    const v = e.target;
+    if (!on || window.__dgUserPlay || !(v instanceof HTMLMediaElement)) return;
+    setTimeout(() => { if (on && !window.__dgUserPlay) v.pause(); }, 300);
   }, true);
   document.addEventListener('pause', () => { window.__dgUserPlay = false; }, true);
 }
