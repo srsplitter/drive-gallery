@@ -109,8 +109,8 @@
   .v-head { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   .v-head .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .v-body { padding: 12px; display: grid; gap: 10px; }
-  .frame { width: 100%; aspect-ratio: 16 / 9; border: 0; background: #000; border-radius: 8px; display: block; }
-  video.frame { max-height: 60dvh; }
+  /* 높이를 화면의 60%로 제한: 폰 가로 화면에서 플레이어가 창을 넘쳐 전체화면 버튼이 가려지지 않게 */
+  .frame { width: 100%; aspect-ratio: 16 / 9; max-height: 60dvh; border: 0; background: #000; border-radius: 8px; display: block; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
