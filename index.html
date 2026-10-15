@@ -116,6 +116,8 @@
   dialog.page #vClose { order: -1; }
   dialog.page .v-body { padding: 8px; }
   dialog.page .frame { aspect-ratio: auto; height: calc(100dvh - 130px); min-height: 180px; max-height: none; object-fit: contain; }
+  .failbox { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; text-align: center; box-sizing: border-box; }
+  .failbox p { margin: 0; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
@@ -650,16 +652,35 @@ function fullscreen(player, f) {
   window.open(`https://drive.google.com/file/d/${f.id}/view`, '_blank', 'noopener');
 }
 
-// 드라이브 파일을 sw.js 로 필요한 부분만 받아 <video> 로 재생. 준비가 안 되거나 재생 오류면 fallback()
+// 드라이브 파일을 sw.js 로 필요한 부분만 받아 <video> 로 재생. 준비가 안 되거나 재생 오류면 fallback(이유)
 function directPlayer(f, fallback) {
   const v = el('video', { className: 'frame', controls: true, playsInline: true, preload: 'metadata' });
-  const fail = () => { if (viewerFile === f && v.isConnected) fallback(); };
-  v.onerror = fail;
+  const src = 'stream/' + f.id + '?' + new URLSearchParams({ size: f.size, type: f.mimeType || 'video/mp4', play: 1 });
+  const fail = reason => { if (viewerFile === f && v.isConnected) fallback(reason); };
+  v.onerror = async () => {
+    const e = v.error || {};
+    let probe = '';
+    try { // 같은 경로로 2바이트만 받아 보며 어디서 막혔는지 확인
+      const r = await fetch(src, { headers: { Range: 'bytes=0-1' } });
+      probe = ` · 응답 ${r.status} ${r.headers.get('Content-Range') || ''}`;
+    } catch (x) { probe = ' · 응답 실패 ' + x.message; }
+    fail(`영상 오류 ${e.code || '?'} ${e.message || ''}${probe} · ${f.mimeType}`);
+  };
   streamReady().then(ok => {
-    if (!ok || !(+f.size > 0)) return fail();
-    if (viewerFile === f && v.isConnected) v.src = 'stream/' + f.id + '?' + new URLSearchParams({ size: f.size, type: f.mimeType || 'video/mp4', play: 1 });
+    if (!ok) return fail(navigator.serviceWorker ? '서비스 워커 준비 안 됨' : '서비스 워커 지원 안 함');
+    if (!(+f.size > 0)) return fail('파일 크기 정보 없음');
+    if (viewerFile === f && v.isConnected) v.src = src;
   });
   return v;
+}
+
+// 폰 직접 재생이 안 될 때: 이유를 보여주고, 원하면 드라이브 플레이어로 (아이폰에선 컨트롤이 겹쳐 불편하므로 자동으로 바꾸지 않음)
+function directFailed(reason, drivePlayer) {
+  const box = el('div', { className: 'frame failbox' },
+    el('p', { textContent: '이 영상은 여기서 바로 재생하지 못했어요.' }),
+    el('p', { className: 'hint', textContent: reason }),
+    el('button', { textContent: '드라이브 플레이어로 보기', onclick: () => box.replaceWith(drivePlayer()) }));
+  return box;
 }
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
@@ -685,7 +706,7 @@ function openViewer(f) {
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   // 폰(화면 캡처 없음): 드라이브 플레이어는 로그인 쿠키를 못 받아 G 로고에서 멈추므로, 파일을 직접 받아 기본 플레이어로 재생.
   // 못 틀면 드라이브 플레이어로 되돌림.
-  const iframe = canCapture ? drivePlayer() : directPlayer(f, () => playerWrap.replaceChildren(drivePlayer()));
+  const iframe = canCapture ? drivePlayer() : directPlayer(f, reason => playerWrap.replaceChildren(directFailed(reason, drivePlayer)));
   // edit-only: 수정 모드(ON)에서만 보임
   const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
