@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="skin" cx="38%" cy="40%" r="65%">
+      <stop offset="0" stop-color="#ffe0b8"/>
+      <stop offset=".45" stop-color="#ffaa7a"/>
+      <stop offset="1" stop-color="#f0645a"/>
+    </radialGradient>
+  </defs>
+  <!-- 잎 -->
+  <path d="M33 14c3-8 12-11 20-9-3 8-11 12-20 9z" fill="#4caf50"/>
+  <path d="M34 13c5-4 10-6 15-6" stroke="#2e7d32" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+  <!-- 열매 -->
+  <path d="M32 16C20 9 6 16 6 33c0 14 11.5 25 26 25s26-11 26-25c0-17-14-24-26-17z" fill="url(#skin)"/>
+  <!-- 가운데 골 -->
+  <path d="M31 18c-7 9-8 28-2 39" stroke="#e0584e" stroke-width="2.6" fill="none" stroke-linecap="round" opacity=".75"/>
+  <!-- 하이라이트 -->
+  <ellipse cx="19" cy="29" rx="5" ry="8" fill="#fff" opacity=".35" transform="rotate(-20 19 29)"/>
+</svg>
