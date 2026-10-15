@@ -112,6 +112,18 @@ const root=path.resolve(__dirname,'..');
     await assign().click();
     const rendered=await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id));
     assert.equal(rendered.length,new Set(rendered).size);
+    await page.evaluate(()=>{
+      SeriesUI.cancel();gallery.series={tail:{name:'뒤쪽 시리즈',videoIds:['d','c']}};
+      gallery.loved={};gallery.tags={};currentView='';query='';filters=EMPTY_FILTERS();renderGrid();
+    });
+    const beforeAssign=await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id));
+    assert.deepEqual(beforeAssign,['a','b','d','c']);
+    await assign().click();
+    assert.deepEqual(await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id)),beforeAssign);
+    await page.locator('.series-group-title').click();
+    assert.deepEqual(await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id)),beforeAssign);
+    await card('b').locator('.thumb').click();await save().click();
+    assert.deepEqual(await page.evaluate(()=>gallery.series.tail.videoIds),['d','c','b']);
     const roundtrip=await page.evaluate(()=>{
       const data={series:{},videos:{a:{file:'keep-a'}},tags:{a:['게임']}};
       applyChanges(data,new Map([['s:test',{name:'마리오 게임 1',videoIds:['b','a']}]]));

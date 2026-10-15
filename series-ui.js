@@ -18,7 +18,9 @@ const SeriesUI = (() => {
   function start() {
     if (!editing()) return;
     cancel(); selection = { id: null, ids: [] };
-    clearTimeout(searchTimer); currentView = ''; query = ''; searchOpen = false;
+    if (currentView) {
+      clearTimeout(searchTimer); currentView = ''; query = ''; searchOpen = false;
+    }
     renderGrid();
   }
   function activate(id) {
@@ -82,7 +84,8 @@ const SeriesUI = (() => {
     const byId = new Map(list.map(f => [f.id, f])), done = new Set(), blocks = [];
     for (const f of list) {
       const id = owner(f.id);
-      if (!id || done.has(id)) continue;
+      if (!id) { blocks.push(videoCard(f, counts)); continue; }
+      if (done.has(id)) continue;
       done.add(id);
       const s = saved()[id];
       const videos = members(id).filter(key => byId.has(key)).map(key => byId.get(key));
@@ -93,10 +96,9 @@ const SeriesUI = (() => {
       group.onclick = e => { if (!e.target.closest('.card,button')) activate(id); };
       blocks.push(group);
     }
-    const other = list.filter(f => !owner(f.id));
     return el('div', { className: 'series-selection' },
       el('p', { className: 'hint', textContent: '순서대로 썸네일을 누른 뒤 저장하세요. 노란 묶음을 고르면 기존 시리즈에 추가합니다.' }),
-      ...blocks, el('div', { className: 'cat-grid' }, ...other.map(f => videoCard(f, counts))));
+      el('div', { className: 'cat-grid' }, ...blocks));
   }
   function rename(id, button) {
     if (!editing()) return;
