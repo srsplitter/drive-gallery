@@ -221,6 +221,7 @@ async function relogin() {
   flushSaves();
   prefetchCandidates();
   runCandJobs();
+  if (!viewer.open) scrollToNextTodo(); // 다시 로그인하면 썸네일 안 정한 첫 영상으로
 }
 
 // 만료 10분 전부터는 사이트를 클릭할 때 로그인을 미리 연장 (이미 허용한 거라 구글 창이 잠깐 떴다 닫힘)
@@ -244,12 +245,12 @@ function showLoggedOut(msg) {
   $('#login').hidden = false;
   $('#authBtn').hidden = true;
   $('#editBtn').hidden = true;
-  setEditMode(false);
+  renderEditBtn(); // 수정 ON/OFF 는 그대로 둠 (다시 로그인하면 이어서 작업, 탭을 닫으면 OFF)
   setStatus(msg || '');
 }
 
 // 수정 모드: ON 이면 영상 창에 썸네일 수정 버튼들이 보인다. 기본 OFF.
-// ON 은 이 탭을 닫거나 로그아웃할 때까지 유지 (새로고침해도 유지)
+// ON 은 이 탭을 닫을 때까지 유지 (새로고침·로그아웃 후 다시 로그인해도 유지)
 function setEditMode(on) {
   if (on) sessionStorage.setItem('editMode', '1'); else sessionStorage.removeItem('editMode');
   document.body.classList.toggle('editing', on);
