@@ -52,6 +52,12 @@
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
   .seek-bar { flex: 1; accent-color: var(--accent); }
+  .row.end { justify-content: flex-end; }
+  button.danger { background: #c62828; border-color: #c62828; color: #fff; }
+  body.editing #vTitle { cursor: text; }
+  body.editing #vTitle:hover { text-decoration: underline dotted; }
+  #vTitle input { width: 100%; font: inherit; font-weight: 600; padding: 4px 8px; border-radius: 8px;
+    border: 1px solid var(--accent); background: var(--bg); color: var(--text); }
   .cands { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
   .cands:empty { display: none; }
   .cands > :not(.cand) { grid-column: 1 / -1; justify-self: start; margin: 0; }
@@ -122,6 +128,8 @@
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.appdata';
+// 영상 이름 바꾸기·휴지통으로 옮기기에는 드라이브 수정 권한이 필요 — 그 기능을 처음 쓸 때만 추가로 요청
+const SCOPE_WRITE = 'https://www.googleapis.com/auth/drive';
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const GALLERY_NAME = 'gallery.json';
@@ -144,7 +152,7 @@ function fmtSize(bytes) {
 
 // ---------- 인증 ----------
 class AuthError extends Error {}
-let token = null, tokenExp = 0, tokenClient = null;
+let token = null, tokenExp = 0, tokenScopes = '', tokenClient = null;
 
 function clientId() { return CLIENT_ID || localStorage.getItem('clientId') || ''; }
 
@@ -155,24 +163,37 @@ function loadGis() {
   });
 }
 
-function requestToken() {
+// extraScope: 기본 권한에 더해 요청할 권한 (이미 허용한 권한은 그대로 유지됨)
+function requestToken(extraScope) {
   return new Promise((resolve, reject) => {
     tokenClient.callback = r => {
       if (r.error) return reject(new Error(r.error_description || r.error));
       token = r.access_token;
       tokenExp = Date.now() + (r.expires_in - 60) * 1000;
-      sessionStorage.setItem('tok', JSON.stringify({ token, tokenExp }));
+      tokenScopes = r.scope || '';
+      sessionStorage.setItem('tok', JSON.stringify({ token, tokenExp, tokenScopes }));
       resolve();
     };
     tokenClient.error_callback = e => reject(new Error(e.message || e.type));
-    tokenClient.requestAccessToken({ prompt: '' });
+    tokenClient.requestAccessToken(extraScope ? { prompt: '', scope: SCOPES + ' ' + extraScope } : { prompt: '' });
   });
+}
+
+function hasScope(scope) { return tokenScopes.split(' ').includes(scope); }
+
+// 드라이브 수정 권한이 없으면 추가로 받는다(구글 확인 창). 받았으면 true
+async function ensureWriteScope() {
+  if (hasScope(SCOPE_WRITE)) return true;
+  try { await requestToken(SCOPE_WRITE); } catch (e) { showPreviewMessage('권한을 받지 못했어요: ' + e.message); return false; }
+  if (hasScope(SCOPE_WRITE)) return true;
+  showPreviewMessage('구글 확인 창에서 "Google Drive 파일 보기·수정·생성·삭제" 권한을 체크해야 이름 바꾸기·휴지통 기능을 쓸 수 있어요.');
+  return false;
 }
 
 function restoreToken() {
   try {
     const t = JSON.parse(sessionStorage.getItem('tok') || 'null');
-    if (t && t.tokenExp > Date.now()) ({ token, tokenExp } = t);
+    if (t && t.tokenExp > Date.now()) ({ token, tokenExp, tokenScopes = '' } = t);
   } catch {}
 }
 
@@ -431,6 +452,7 @@ function openViewer(f) {
   closeViewerResources();
   viewerFile = f;
   $('#vTitle').textContent = f.name;
+  $('#vTitle').onclick = () => { if (document.body.classList.contains('editing')) startRename(f); }; // 수정 ON: 이름 바꾸기
   const custom = gallery.videos[f.id];
   const iframe = el('iframe', { className: 'frame', src: `https://drive.google.com/file/d/${f.id}/preview`, allow: 'autoplay; fullscreen', allowFullscreen: true });
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
@@ -491,7 +513,8 @@ function openViewer(f) {
     el('p', { className: 'hint edit-only ext-only', textContent: '영상을 클릭하면 불러온 뒤 바로 멈춰요(계속 보려면 ⏯). 시간선·버튼으로 장면을 맞추고 "📸 지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
     el('p', { className: 'hint edit-only no-ext-only', textContent: canCapture
       ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.'
-      : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }));
+      : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }),
+    el('div', { className: 'row end edit-only' }, trashButton(f)));
   viewer.showModal();
   // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 시간 조절바가 바로 보임.
   // 플레이어가 준비되는 데 시간이 걸려 1.2초 뒤부터 확인하고, 아직이면 재생 버튼을 다시 누름(최대 4번)
@@ -507,6 +530,89 @@ function openViewer(f) {
   // 대표 장면: 수정 ON 이면 바로, 창을 연 채 수정을 켜면 그때 (미리 뽑아 둔 게 있으면 즉시 보임)
   viewerUI.startCands = () => { if (!cands.hasChildNodes()) showCandidates(f, iframe, cands, captureBtn); };
   if (document.body.classList.contains('editing')) viewerUI.startCands();
+}
+
+// ---------- 영상 휴지통으로 ----------
+// 🗑️ 를 누르면 그 자리에서 [취소] [🗑️ 휴지통으로 이동]으로 바뀌고, 한 번 더 누르면 드라이브 휴지통으로 옮김(30일 안에 복원 가능).
+// 창은 바로 닫히고 목록에서도 바로 빠지며, 실제 이동은 뒤에서. 실패하면 목록에 되돌려 놓음.
+function trashButton(f) {
+  const btn = el('button', { className: 'danger', textContent: '🗑️', title: '드라이브 휴지통으로 이동' });
+  const cancel = el('button', { textContent: '취소' });
+  let armed = false;
+  cancel.onclick = () => { btn.textContent = '🗑️'; cancel.remove(); armed = false; };
+  btn.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      btn.textContent = '🗑️ 휴지통으로 이동';
+      btn.before(cancel);
+      return;
+    }
+    if (!await ensureWriteScope()) return;
+    trashVideo(f);
+    viewer.close();
+  };
+  return btn;
+}
+
+async function trashVideo(f) {
+  const at = items.findIndex(x => x.id === f.id);
+  if (at >= 0) items.splice(at, 1);
+  renderGrid();
+  setStatus(`"${f.name}"을(를) 휴지통으로 옮기는 중…`);
+  try {
+    await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+    if (gallery.videos[f.id]) saveEntry(f.id, null); // 지정해 둔 썸네일도 정리
+    setStatus(`"${f.name}"을(를) 드라이브 휴지통으로 옮겼어요. (30일 안에 드라이브 휴지통에서 복원 가능)`);
+  } catch (e) {
+    if (at >= 0 && !items.some(x => x.id === f.id)) items.splice(Math.min(at, items.length), 0, f);
+    renderGrid();
+    setStatus(`"${f.name}"을(를) 휴지통으로 옮기지 못했어요: ${e.message}`, true);
+  }
+}
+
+// ---------- 영상 이름 바꾸기 ----------
+// 수정 ON 에서 창 위쪽 이름을 누르면 입력칸으로 바뀜(확장자 앞까지 선택). Enter·다른 곳 클릭 = 저장, Esc = 취소.
+// 이름은 바로 바뀌어 보이고 드라이브 반영은 뒤에서. 실패하면 원래 이름으로.
+function startRename(f) {
+  const title = $('#vTitle');
+  if (title.querySelector('input')) return;
+  const input = el('input', { value: f.name, spellcheck: false });
+  title.replaceChildren(input);
+  input.focus();
+  const dot = f.name.lastIndexOf('.');
+  input.setSelectionRange(0, dot > 0 ? dot : f.name.length);
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    title.textContent = f.name;
+    if (!save || !name || name === f.name) return;
+    if (!await ensureWriteScope()) return;
+    renameVideo(f, name);
+  };
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); } // 창이 닫히지 않게
+  };
+  input.onblur = () => finish(true);
+}
+
+async function renameVideo(f, name) {
+  const old = f.name;
+  f.name = name;
+  renderGrid();
+  if (viewer.open && viewerFile === f) $('#vTitle').textContent = name;
+  try {
+    await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+  } catch (e) {
+    if (f.name === name) {
+      f.name = old;
+      renderGrid();
+      if (viewer.open && viewerFile === f && !$('#vTitle input')) $('#vTitle').textContent = old;
+    }
+    setStatus(`이름을 바꾸지 못했어요: ${e.message}`, true);
+  }
 }
 
 // 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
