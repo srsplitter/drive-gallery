@@ -49,6 +49,7 @@ async function capture(tab) {
 
 async function player(tab, action, delta) {
   const frames = (await inFrames(tab, framePlayer, [action, delta])).map((r) => r.result).filter(Boolean);
+  if (action === 'kick') return { ok: frames.some((r) => r.kicked) };
   const hit = frames.find((r) => r.acted);
   if (hit) return { ok: true, paused: hit.paused, time: hit.time, duration: hit.duration };
   const seen = frames.map((r) => `${r.where}(영상 ${r.videos})`).join(', ') || '하위 프레임 없음';
@@ -88,7 +89,8 @@ function frameHideUi(hide) {
 }
 
 // 이 프레임의 영상(Shadow DOM 안까지 찾음)에 재생/멈춤·시간 이동 적용
-function framePlayer(action, delta) {
+// seekToWait: 그 시각으로 옮기고 그 장면이 화면에 그려질 때까지 기다림 (대표 장면 캡처용)
+async function framePlayer(action, delta) {
   if (window === window.top) return null;
   const found = [];
   const walk = (root) => {
@@ -100,16 +102,34 @@ function framePlayer(action, delta) {
   walk(document);
   const where = (location.hostname || location.protocol) + location.pathname.slice(0, 30);
   const v = found.find((x) => x.offsetWidth > 0 && x.offsetHeight > 0) || found[0];
+  if (action === 'kick') {
+    // 영상 불러오기: 영상이 있으면 재생(수정 모드면 autopause.js 가 곧 멈춤), 아직 없으면 화면 가운데(재생 버튼)를 클릭
+    if (v) { v.play().catch(() => {}); return { where, videos: found.length, kicked: true }; }
+    const x = innerWidth / 2, y = innerHeight / 2, target = document.elementFromPoint(x, y);
+    if (target && target.tagName !== 'IFRAME') { // 가운데가 하위 iframe 이면 그 안의 이 함수가 처리
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        const Ev = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+        target.dispatchEvent(new Ev(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 }));
+      }
+    }
+    return { where, videos: 0, kicked: true };
+  }
   if (!v) return { where, videos: 0 };
   if (action === 'toggle') {
     // ⏯ 로 재생하는 건 자동 멈춤(autopause.js)에서 제외
     if (v.paused) { window.__dgUserPlay = true; v.play().catch(() => {}); } else v.pause();
-  } else if (action === 'seek' || action === 'seekTo') { // seek: 상대 이동, seekTo: 그 시각으로
+  } else if (action === 'seek' || action === 'seekTo' || action === 'seekToWait') { // seek: 상대 이동, seekTo: 그 시각으로
     v.pause();
     const end = Number.isFinite(v.duration) ? v.duration : Infinity;
     window.__dgOwnSeek = true; // 시간표 클릭 1초 보정(autopause.js)에서 제외
     setTimeout(() => { window.__dgOwnSeek = false; }, 1000);
+    const seeked = new Promise((r) => { v.addEventListener('seeked', r, { once: true }); setTimeout(r, 5000); });
     v.currentTime = Math.min(Math.max(0, action === 'seek' ? v.currentTime + delta : delta), end);
+    if (action === 'seekToWait') {
+      await seeked;
+      for (let i = 0; i < 30 && v.readyState < 2; i++) await new Promise((r) => setTimeout(r, 100)); // 장면 데이터 도착
+      await new Promise((r) => setTimeout(r, 150)); // 화면에 그려질 시간
+    }
   } // action === 'state': 상태만 알려줌
   return { where, videos: found.length, acted: true, paused: v.paused, time: v.currentTime,
     duration: Number.isFinite(v.duration) ? v.duration : 0 };

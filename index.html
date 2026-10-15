@@ -52,6 +52,14 @@
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
   .seek-bar { flex: 1; accent-color: var(--accent); }
+  .cands { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .cands:empty { display: none; }
+  .cands > :not(.cand) { grid-column: 1 / -1; justify-self: start; margin: 0; }
+  .cand { padding: 0; overflow: hidden; display: grid; text-align: center; }
+  .cand img, .cand .cand-img { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; display: block; }
+  .cand span { font-size: 12px; padding: 4px; color: var(--dim); }
+  .cand:disabled .cand-img { animation: pulse 1s infinite alternate; }
+  @keyframes pulse { to { opacity: .4; } }
   .cropper { position: absolute; inset: 0; overflow: hidden; background: #000; border-radius: 8px; touch-action: none; }
   .cropper canvas { position: absolute; }
   .crop-box { position: absolute; box-sizing: border-box; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.55); cursor: move; }
@@ -188,6 +196,8 @@ function setEditMode(on) {
   if (!on && restorePending) restorePending(); // 대기 중이던 [바꾸기] 취소
   renderEditBtn();
   syncAutoPause();
+  if (on && viewer.open && viewerUI && viewerUI.startCands) viewerUI.startCands(); // 창을 연 채 수정을 켜면 대표 장면 시작
+  if (on) prefetchCandidates();
 }
 
 // 확장에 수정 ON/OFF 를 알림 → ON 이면 영상을 클릭해 재생하는 순간 바로 멈춤 (⏯ 로 재생한 건 제외)
@@ -346,6 +356,7 @@ async function openFolder() {
 
 function renderGrid() {
   $('#grid').replaceChildren(...items.map(f => f.mimeType === 'application/vnd.google-apps.folder' ? folderCard(f) : videoCard(f)));
+  prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 2개"가 바뀜
 }
 
 function folderCard(f) {
@@ -411,7 +422,7 @@ async function streamReady() {
   } catch { return false; }
 }
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
-viewer.addEventListener('close', () => { if (!viewer.open) closeViewerResources(); });
+viewer.addEventListener('close', () => { if (!viewer.open) { closeViewerResources(); prefetchCandidates(); } });
 $('#vClose').onclick = () => viewer.close();
 
 let viewerFile = null;
@@ -436,6 +447,7 @@ function openViewer(f) {
   // 항상 보이는 시간 조절바 (드라이브 플레이어 조절바는 숨었다 나왔다 하므로)
   const seekBar = el('input', { type: 'range', min: 0, max: 0, step: 0.1, value: 0, disabled: true, className: 'seek-bar' });
   let dragging = false, seekTimer = null;
+  const cands = el('div', { className: 'cands edit-only' }); // 대표 장면 5개
   const showState = r => {
     if (r.duration) { seekBar.max = r.duration; seekBar.disabled = false; }
     if (!dragging) seekBar.value = r.time;
@@ -473,6 +485,7 @@ function openViewer(f) {
       el('button', { className: 'edit-only', textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
+    cands,
     fileInput,
     el('div', { id: 'preview', className: 'edit-only' }),
     el('p', { className: 'hint edit-only ext-only', textContent: '영상을 클릭하면 불러온 뒤 바로 멈춰요(계속 보려면 ⏯). 시간선·버튼으로 장면을 맞추고 "📸 지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
@@ -480,6 +493,20 @@ function openViewer(f) {
       ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.'
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }));
   viewer.showModal();
+  // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 시간 조절바가 바로 보임.
+  // 플레이어가 준비되는 데 시간이 걸려 1.2초 뒤부터 확인하고, 아직이면 재생 버튼을 다시 누름(최대 4번)
+  iframe.addEventListener('load', async () => {
+    for (let i = 0; i < 4; i++) {
+      await new Promise(r => setTimeout(r, i ? 1500 : 1200));
+      if (!viewer.open || viewerFile !== f || !extReady || !document.body.classList.contains('editing')) return;
+      const st = await extCall('player', { action: 'state' }).catch(() => null);
+      if (st && st.duration) return showState(st); // 이미 불러와짐
+      await extCall('player', { action: 'kick' }).catch(() => {});
+    }
+  }, { once: true });
+  // 대표 장면: 수정 ON 이면 바로, 창을 연 채 수정을 켜면 그때 (미리 뽑아 둔 게 있으면 즉시 보임)
+  viewerUI.startCands = () => { if (!cands.hasChildNodes()) showCandidates(f, iframe, cands, captureBtn); };
+  if (document.body.classList.contains('editing')) viewerUI.startCands();
 }
 
 // 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
@@ -518,18 +545,190 @@ async function startShare() {
   return null;
 }
 
+// 확장으로 탭 화면을 찍어(찍는 순간 플레이어 컨트롤 숨김) 플레이어(iframe) 영역만 잘라 캔버스로
+async function extShot(iframe) {
+  const { dataUrl } = await extCall('capture');
+  const img = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const r = iframe.getBoundingClientRect(), k = img.width / window.innerWidth;
+  const c = el('canvas', { width: Math.round(r.width * k), height: Math.round(r.height * k) });
+  c.getContext('2d').drawImage(img, r.left * k, r.top * k, r.width * k, r.height * k, 0, 0, c.width, c.height);
+  img.close();
+  return c;
+}
+
+// ---------- 대표 장면 5개 (영상 길이의 25·33·50·66·75%) ----------
+// 드라이브 영상 파일에서 직접 뽑는다(그 지점 근처만 받음). 보고 있는 플레이어는 건드리지 않음.
+// 수정 ON 이면 지금 폴더 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개를 미리 뽑아 두고,
+// 영상 창을 열면 뽑아 둔 것(또는 뽑히는 대로)을 보여준다. 누르면 그 장면으로 바로 적용(창 닫힘, 저장은 뒤에서).
+const CAND_POINTS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75];
+const candJobs = new Map(); // 영상 ID → { f, status, dur, shots[], subs, ac }
+let candRunning = false;
+
+function candJob(f) {
+  let j = candJobs.get(f.id);
+  if (!j) {
+    j = { f, status: 'queued', dur: 0, shots: [], subs: new Set(), ac: new AbortController() };
+    candJobs.set(f.id, j);
+  }
+  return j;
+}
+
+function notifyCand(j) { for (const fn of [...j.subs]) fn(); }
+
+// 한 번에 한 영상씩. 지금 열려 있는 영상이 기다리고 있으면 그것부터.
+async function runCandJobs() {
+  if (candRunning) return;
+  candRunning = true;
+  try {
+    for (;;) {
+      const opened = viewer.open && viewerFile && candJobs.get(viewerFile.id);
+      const j = opened && opened.status === 'queued' ? opened : [...candJobs.values()].find(x => x.status === 'queued');
+      if (!j) break;
+      j.status = 'running';
+      notifyCand(j);
+      try {
+        j.status = await extractCandidates(j) ? 'done' : 'unsupported';
+      } catch (e) {
+        if (e instanceof AuthError) { j.status = 'queued'; notifyCand(j); break; } // 다시 로그인하면 이어서
+        j.status = j.ac.signal.aborted ? 'aborted' : 'unsupported';
+      }
+      notifyCand(j);
+    }
+  } finally {
+    candRunning = false;
+  }
+}
+
+// 이 브라우저가 풀 수 없는 형식이면 false
+async function extractCandidates(j) {
+  const { f } = j, size = +f.size || 0, signal = j.ac.signal;
+  if (!size || !('VideoDecoder' in window) || !/mp4|quicktime|m4v|3gpp/.test(f.mimeType)) return false;
+  const src = await openMp4(f.id, size, signal);
+  if (!src || src.unsupported) return false;
+  j.dur = src.duration;
+  notifyCand(j);
+  let made = 0;
+  for (const [i, p] of CAND_POINTS.entries()) {
+    if (signal.aborted) throw new DOMException('중단', 'AbortError');
+    try {
+      const { frame, t } = await extractFrame(src, p * src.duration, signal, true);
+      const c = el('canvas');
+      drawFrame(c, frame, src.rotation);
+      frame.close();
+      j.shots[i] = { t, thumb: capture(c, c.width, c.height) };
+      made++;
+    } catch (e) {
+      if (signal.aborted || e instanceof AuthError) throw e;
+      j.shots[i] = 'fail';
+    }
+    notifyCand(j);
+  }
+  return made > 0;
+}
+
+// 수정 ON 일 때: 지금 폴더의 정렬 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개(+지금 연 영상)만 남기고 미리 뽑기
+function prefetchCandidates() {
+  if (!document.body.classList.contains('editing') || !token) return;
+  const todo = items.filter(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]).slice(0, 2);
+  const keep = new Set(todo.map(x => x.id));
+  if (viewer.open && viewerFile) keep.add(viewerFile.id);
+  for (const [id, j] of candJobs) {
+    if (keep.has(id)) continue;
+    j.ac.abort(); // 이미 정했거나 순서에서 밀린 영상은 멈추고 버림
+    candJobs.delete(id);
+  }
+  for (const x of todo) candJob(x);
+  runCandJobs();
+}
+
+function candSlots(box, dur) {
+  box.replaceChildren();
+  return CAND_POINTS.map(p => {
+    const b = el('button', { className: 'cand', disabled: true }, el('div', { className: 'cand-img' }),
+      el('span', { textContent: `${Math.round(p * 100)}% · ${fmtTime(p * dur)}` }));
+    box.append(b);
+    return b;
+  });
+}
+
+function fillSlot(f, b, thumb, t) {
+  b.firstChild.replaceWith(el('img', { src: thumb, alt: '' }));
+  b.disabled = false;
+  b.onclick = () => {
+    saveEntry(f.id, { t: Math.round(t * 10) / 10, thumb, at: new Date().toISOString() });
+    viewer.close();
+  };
+}
+
+// 영상 창의 대표 장면 칸: 그 영상의 작업 결과를 보여주고, 새 장면이 뽑힐 때마다 채움
+function showCandidates(f, iframe, box, captureBtn) {
+  const j = candJob(f);
+  let slots = null, filled = [];
+  const render = () => {
+    if (!box.isConnected) return j.subs.delete(render); // 창을 닫았거나 다른 화면으로 바뀜
+    if (j.status === 'unsupported' || j.status === 'aborted') {
+      j.subs.delete(render);
+      return box.replaceChildren(
+        el('button', { className: 'ext-only', textContent: '🎞️ 플레이어로 대표 장면 뽑기 (플레이어가 3~4초 움직여요)',
+          onclick: () => candidatesFromPlayer(f, iframe, box, captureBtn) }),
+        el('p', { className: 'hint no-ext-only', textContent: '이 영상 형식은 대표 장면을 자동으로 뽑을 수 없어요.' }));
+    }
+    if (!j.dur) {
+      return box.replaceChildren(el('p', { className: 'hint', textContent: j.status === 'queued' ? '대표 장면: 앞 영상 다음 차례예요…' : '대표 장면 뽑는 중…' }));
+    }
+    if (!slots) { slots = candSlots(box, j.dur); filled = []; }
+    j.shots.forEach((s, i) => {
+      if (!s || filled[i]) return;
+      filled[i] = true;
+      if (s === 'fail') slots[i].lastChild.textContent += ' · 실패';
+      else fillSlot(f, slots[i], s.thumb, s.t);
+    });
+  };
+  j.subs.add(render);
+  render();
+  runCandJobs();
+}
+
+// 파일에서 못 뽑는 형식일 때(확장 필요, 누를 때만): 플레이어를 각 지점으로 옮겨 찍고 원래 위치로 돌아감
+async function candidatesFromPlayer(f, iframe, box, captureBtn) {
+  let start = null;
+  try { start = await extCall('player', { action: 'state' }); } catch {}
+  if (!start || !start.duration) return showPreviewMessage('영상을 한 번 클릭해 불러온 뒤 눌러 주세요.');
+  const dur = start.duration, back = start.time, mine = viewerFile;
+  const alive = () => viewer.open && viewerFile === mine;
+  const slots = candSlots(box, dur);
+  captureBtn.disabled = true; // 찍는 동안 📸 와 겹치지 않게
+  let last = 0;
+  try {
+    for (const [i, p] of CAND_POINTS.entries()) {
+      if (!alive()) return;
+      await extCall('player', { action: 'seekToWait', delta: p * dur });
+      const wait = 550 - (performance.now() - last); // 크롬 탭 캡처는 초당 2번까지
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      if (!alive()) return;
+      const shot = await extShot(iframe);
+      last = performance.now();
+      const r = contentRect(shot); // 플레이어의 검은 여백 제외
+      const c = el('canvas', { width: r.w, height: r.h });
+      c.getContext('2d').drawImage(shot, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+      fillSlot(f, slots[i], capture(c, r.w, r.h), p * dur);
+    }
+  } catch (e) {
+    if (alive()) showPreviewMessage('대표 장면을 뽑지 못했어요: ' + e.message);
+  } finally {
+    if (alive()) {
+      captureBtn.disabled = false;
+      extCall('player', { action: 'seekTo', delta: back }).catch(() => {});
+    }
+  }
+}
+
 // 확장 프로그램으로 캡처: 공유 허용 없이, 찍는 순간 플레이어 컨트롤을 숨기고 탭 화면을 찍어 플레이어 영역만 잘라냄
 async function captureViaExt(f, iframe, btn) {
   btn.disabled = true;
   $('#preview').replaceChildren();
   try {
-    const { dataUrl } = await extCall('capture');
-    const img = await createImageBitmap(await (await fetch(dataUrl)).blob());
-    const r = iframe.getBoundingClientRect(), k = img.width / window.innerWidth;
-    const c = el('canvas', { width: Math.round(r.width * k), height: Math.round(r.height * k) });
-    c.getContext('2d').drawImage(img, r.left * k, r.top * k, r.width * k, r.height * k, 0, 0, c.width, c.height);
-    img.close();
-    askThumb(f, c, btn);
+    askThumb(f, await extShot(iframe), btn);
   } catch (e) {
     showPreviewMessage('캡처하지 못했어요: ' + e.message);
   } finally {
@@ -823,7 +1022,8 @@ async function openMp4(id, size, signal) {
 }
 
 // t초에 보이는 프레임을 디코딩해 { frame(VideoFrame), t(실제 프레임 시각) } 반환
-async function extractFrame(src, t, signal) {
+// onlyNeeded: 그 프레임까지만 받음(한 번만 뽑을 때, 대표 장면용). 아니면 구간 전체를 받아 두고 재사용(미세 이동용)
+async function extractFrame(src, t, signal, onlyNeeded) {
   const { samples, timescale } = src;
   const want = t * timescale;
   let target = 0;
@@ -833,15 +1033,17 @@ async function extractFrame(src, t, signal) {
   let key = target;
   while (key > 0 && !samples[key].is_sync) key--;
   let next = target + 1;
-  while (next < samples.length && !samples[next].is_sync) next++;
+  while (!onlyNeeded && next < samples.length && !samples[next].is_sync) next++;
   // 키프레임~다음 키프레임 직전(한 구간)을 한 번에 받아 두고, 같은 구간 안 미세 이동은 재사용
-  let gop = src.cache.get(key);
+  let gop = onlyNeeded ? null : src.cache.get(key);
   if (!gop) {
     let lo = Infinity, hi = 0;
     for (let i = key; i < next; i++) { lo = Math.min(lo, samples[i].offset); hi = Math.max(hi, samples[i].offset + samples[i].size); }
     gop = { lo, buf: await rangeBuf(src.id, lo, hi - 1, signal) };
-    src.cache.set(key, gop);
-    if (src.cache.size > 3) src.cache.delete(src.cache.keys().next().value);
+    if (!onlyNeeded) {
+      src.cache.set(key, gop);
+      if (src.cache.size > 3) src.cache.delete(src.cache.keys().next().value);
+    }
   }
   const us = v => Math.round(v * 1e6 / timescale);
   const wantTs = us(samples[target].cts);
