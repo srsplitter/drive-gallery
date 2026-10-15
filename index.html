@@ -700,12 +700,17 @@ function directPlayer(f) {
   v.onerror = async () => {
     if (v.readyState > 0) return; // 이미 불러와 재생 중이면 무시
     const e = v.error || {};
+    let trail = '';
+    try { // 워커가 중계한 최근 요청 기록: 플레이어가 물은 범위→드라이브 응답 상태 · 보낸 범위 · 대기 시간(·미리 = 미리 받은 조각)
+      const lg = await (await fetch('stream/_log')).json();
+      trail = lg.slice(-6).map(x => `${x.range}→${x.up} ${x.out} ${(x.ms / 1000).toFixed(1)}s${x.pre ? '·미리' : ''}`).join(' | ');
+    } catch {}
     let probe = '';
     try { // 같은 경로로 2바이트만 받아 보며 어디서 막혔는지 확인
       const r = await fetch(src, { headers: { Range: 'bytes=0-1' } });
       probe = ` · 응답 ${r.status}`;
     } catch (x) { probe = ' · 응답 실패 ' + x.message; }
-    note(`재생을 못 했어요 (오류 ${e.code || '?'} ${e.message || ''}${probe}). 안 되면 "드라이브에서 열기"`);
+    note(`재생을 못 했어요 (오류 ${e.code || '?'} ${e.message || ''}${probe}). 안 되면 "드라이브에서 열기"${trail ? ' · 기록: ' + trail : ''}`);
   };
   if (!canPlayDirect(f)) { // 수정 ON 에서 못 푸는 형식을 열었을 때: 창에 붙은 뒤 안내만
     setTimeout(() => note(+f.size > 0 ? '이 브라우저가 못 푸는 형식이에요. "드라이브에서 열기"를 써 주세요.' : '파일 크기 정보가 없어 재생할 수 없어요. "드라이브에서 열기"를 써 주세요.'));

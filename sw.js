@@ -1,12 +1,20 @@
 // 드라이브 영상을 <video src="stream/<파일ID>?size=..&type=..[&play=1]"> 로 재생하기 위한 중계.
 // <video> 의 Range 요청을 드라이브 API 로 넘기면서 인증 헤더를 붙인다.
+// 응답은 항상 206 + 정확한 Content-Range/Content-Length 로 돌려준다 — 아이폰(WebKit)은 Range 를 물었는데 200 이 오면
+// 그 영상을 재생하지 않는다(WebKit 버그 184447). 드라이브가 200 으로 통째로 주면 필요한 만큼만 잘라 206 으로 바꾼다.
 // - 장면 지정(play 없음): 한 번에 최대 CHUNK 만큼만 받아오므로, 큰 영상도 찾는 구간 근처만 내려받는다.
-// - 재생(play=1): 플레이어가 요청한 범위를 자르지 않고 그대로 올려 한 번의 응답으로 이어서 받는다.
-//   요청마다 드라이브 응답 대기(0.5~1초)가 붙어서 조각내면 고화질 영상이 자꾸 끊긴다.
-//   플레이어(아이폰 AVFoundation 등)가 버퍼가 차면 스스로 끊고 이어서 다시 요청하므로 통째로 받지는 않는다.
+// - 재생(play=1): 한 응답은 PLAY_CHUNK 경계까지만 주되(아이폰에서 검증된 작은 응답), 이어지는 조각 AHEAD 개를 미리 요청해 둔다.
+//   요청마다 드라이브 응답 대기(0.5~1초)가 붙는데, 미리 받아 두면 플레이어가 다음 조각을 물을 때 바로 흘려보낼 수 있어
+//   고화질 영상도 끊기지 않는다. 미리 받은 조각은 60초 안에 안 쓰이거나 다른 영상을 열면 버린다.
+// - stream/_log: 최근 중계 기록(진단용). 페이지가 재생 실패 안내에 붙여 보여준다.
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const CHUNK = 4 * 1024 * 1024;
+const PLAY_CHUNK = 4 * 1024 * 1024; // 아이폰에서 재생이 확인된 응답 크기
+const AHEAD = 4; // 미리 받아 둘 조각 수 (최대 16MB 가 워커 메모리에 머묾)
+const PREFETCH_TTL = 60 * 1000;
 let auth = null; // { token, exp }
+const prefetches = new Map(); // `${id}:${start}` → { id, t, ctrl, p: Promise<Response> } (start 은 PLAY_CHUNK 경계)
+const log = []; // 최근 12건: { id, range, out, up, pre, ms }
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
@@ -29,9 +37,57 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   const m = url.pathname.match(/\/stream\/([\w-]+)$/);
   if (url.origin !== location.origin || !m) return;
+  if (m[1] === '_log') return e.respondWith(new Response(JSON.stringify(log), { headers: { 'Content-Type': 'application/json' } }));
   e.respondWith(stream(m[1], +url.searchParams.get('size'), url.searchParams.get('type') || 'video/mp4', e.request,
     !!url.searchParams.get('play')));
 });
+
+function fetchRange(token, id, start, end, signal) {
+  return fetch(`${DRIVE}/files/${id}?alt=media`, { headers: { Authorization: 'Bearer ' + token, Range: `bytes=${start}-${end}` }, signal });
+}
+
+// 앞에서부터 n 바이트만 흘려보내고 나머지는 끊는다(원본 스트림도 취소됨)
+function limit(body, n) {
+  let left = n;
+  return body.pipeThrough(new TransformStream({
+    transform(chunk, c) {
+      if (left <= 0) return;
+      if (chunk.byteLength > left) chunk = chunk.subarray(0, left);
+      left -= chunk.byteLength;
+      c.enqueue(chunk);
+      if (left <= 0) c.terminate();
+    },
+  }));
+}
+
+function drop(key) {
+  const e = prefetches.get(key);
+  if (e) { e.ctrl.abort(); prefetches.delete(key); }
+}
+// 다른 영상 것이거나 오래된 미리 받기는 버린다
+function sweep(id) {
+  const now = Date.now();
+  for (const [key, e] of prefetches) if (e.id !== id || now - e.t > PREFETCH_TTL) drop(key);
+}
+function takePrefetch(id, start) {
+  sweep(id);
+  const key = `${id}:${start}`, e = prefetches.get(key);
+  if (e) prefetches.delete(key);
+  return e || null;
+}
+// from(PLAY_CHUNK 경계)부터 AHEAD 개 조각을 미리 요청해 둔다
+function prefetch(token, id, from, size) {
+  sweep(id);
+  for (let s = from, n = 0; s < size && n < AHEAD; s += PLAY_CHUNK, n++) {
+    const key = `${id}:${s}`;
+    if (prefetches.has(key)) continue;
+    const ctrl = new AbortController();
+    const e = { id, t: Date.now(), ctrl, p: fetchRange(token, id, s, Math.min(s + PLAY_CHUNK - 1, size - 1), ctrl.signal) };
+    e.p.catch(() => { if (prefetches.get(key) === e) prefetches.delete(key); });
+    prefetches.set(key, e);
+  }
+  while (prefetches.size > AHEAD + 1) drop(prefetches.keys().next().value);
+}
 
 async function stream(id, size, type, req, play) {
   const token = await getToken();
@@ -39,27 +95,34 @@ async function stream(id, size, type, req, play) {
   if (!(size > 0)) return new Response('size required', { status: 400 });
   const r = /bytes=(\d+)-(\d*)/.exec(req.headers.get('Range') || '');
   const start = r ? +r[1] : 0;
+  const reqEnd = r && r[2] ? Math.min(+r[2], size - 1) : size - 1;
   if (start >= size) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
-  const headers = { Authorization: 'Bearer ' + token };
-  if (play) {
-    // 재생: 플레이어가 보낸 Range 그대로(끝이 비어 있으면 끝까지). Range 가 없으면 파일 전체(200)
-    if (r) headers.Range = `bytes=${start}-${r[2]}`;
-  } else {
-    headers.Range = `bytes=${start}-${Math.min(r && r[2] ? +r[2] : size - 1, start + CHUNK - 1, size - 1)}`;
-  }
-  const up = await fetch(`${DRIVE}/files/${id}?alt=media`, { headers, signal: req.signal });
-  // 재생에서 Range 없이 물었거나 드라이브가 처음부터 통째로 주면(200) 그대로 통과. 중간부터 물었는데 200 이면 전체가 내려오므로 즉시 끊는다
-  const whole = up.status === 200 && play && start === 0;
-  if (up.status !== 206 && !whole) {
+  // 재생: 다음 PLAY_CHUNK 경계까지(미리 받은 조각과 맞물리게). 장면 지정: CHUNK 까지
+  const chunkEnd = play ? (Math.floor(start / PLAY_CHUNK) + 1) * PLAY_CHUNK - 1 : start + CHUNK - 1;
+  let end = Math.min(reqEnd, chunkEnd, size - 1);
+  const t0 = Date.now();
+  const pre = play ? takePrefetch(id, start) : null;
+  let up = pre ? await pre.p.catch(() => null) : null;
+  if (!up) up = await fetchRange(token, id, start, end, req.signal);
+  if (play) prefetch(token, id, (Math.floor(end / PLAY_CHUNK) + 1) * PLAY_CHUNK, size);
+  log.push({ id: id.slice(-6), range: `${start}-${r && r[2] ? r[2] : ''}`, out: `${start}-${end}`, up: up.status, pre: !!pre, ms: Date.now() - t0 });
+  if (log.length > 12) log.shift();
+  // 206 이 아니면서 처음부터 통째로 주는 200 도 아니면(중간부터 물었는데 200 등) 즉시 끊는다
+  if (up.status !== 206 && !(up.status === 200 && start === 0)) {
     if (up.body) up.body.cancel();
     return new Response(null, { status: up.ok ? 502 : up.status });
   }
-  // 범위·길이는 드라이브 응답 헤더를 그대로 통과(없으면 요청한 범위로 채움)
-  const out = { 'Content-Type': type, 'Accept-Ranges': 'bytes' };
-  const len = up.headers.get('Content-Length');
-  if (len) out['Content-Length'] = len;
-  if (up.status === 206) {
-    out['Content-Range'] = up.headers.get('Content-Range') || `bytes ${start}-${len ? start + +len - 1 : size - 1}/${size}`;
-  }
-  return new Response(up.body, { status: up.status, headers: out });
+  // 드라이브가 요청보다 덜 줬으면(206 의 길이) 그만큼만 범위로 잡고, 더 주면(200·미리 받은 조각) 필요한 만큼만 잘라 보낸다
+  const len = up.status === 206 ? +up.headers.get('Content-Length') || 0 : 0;
+  if (len && len < end - start + 1) end = start + len - 1;
+  const want = end - start + 1;
+  return new Response(limit(up.body, want), {
+    status: 206,
+    headers: {
+      'Content-Type': type,
+      'Content-Range': `bytes ${start}-${end}/${size}`,
+      'Content-Length': String(want),
+      'Accept-Ranges': 'bytes',
+    },
+  });
 }
