@@ -48,6 +48,10 @@
     background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); }
   @media (max-width: 520px), (pointer: coarse) { #colsBtn { display: block; } }
   #catbar[hidden] ~ #colsBtn { display: none; }
+  /* 길이: PC는 썸네일 위, 폰은 이름 아래 줄(이름과 같은 글자 크기) */
+  .dur-line { display: none; color: var(--dim); }
+  .card .name.dur-line { padding-top: 0; }
+  @media (max-width: 520px), (pointer: coarse) { .badge.dur { display: none; } .dur-line { display: block; } }
   body[data-cols] .cat-grid { grid-template-columns: repeat(var(--cols), 1fr); }
   body[data-cols="3"] .cat-grid { gap: 8px; }
   body[data-cols="4"] .cat-grid { gap: 6px; }
@@ -619,14 +623,15 @@ function videoCard(f) {
   } else {
     thumb.append(el('span', { className: 'icon', textContent: '🎞️' }));
   }
-  if (custom) thumb.append(el('span', { className: 'badge pin', textContent: '📌' + (typeof custom.t === 'number' ? ' ' + fmtTime(custom.t) : '') }));
+  if (custom) thumb.append(el('span', { className: 'badge pin edit-only', textContent: '📌' + (typeof custom.t === 'number' ? ' ' + fmtTime(custom.t) : '') }));
   const dur = f.videoMediaMetadata && +f.videoMediaMetadata.durationMillis;
-  if (dur) thumb.append(el('span', { className: 'badge', textContent: fmtTime(dur / 1000) }));
+  if (dur) thumb.append(el('span', { className: 'badge dur', textContent: fmtTime(dur / 1000) }));
   // 폰 + 수정 OFF: 바로 드라이브(앱)로 열기 — 끼워 넣은 드라이브 플레이어는 폰에서 느리고 컨트롤이 겹침. 수정 ON 이면 영상 창
   const open = () => isPhone && !document.body.classList.contains('editing')
     ? (location.href = `https://drive.google.com/file/d/${f.id}/view`) : openViewer(f);
   const card = el('button', { className: 'card', onclick: open },
-    thumb, el('div', { className: 'name', textContent: f.name, title: f.name }));
+    thumb, el('div', { className: 'name', textContent: f.name, title: f.name }),
+    dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
   return card;
