@@ -109,6 +109,10 @@
     -webkit-mask: var(--pen) center / contain no-repeat; mask: var(--pen) center / contain no-repeat;
     --pen: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3Cpath d='M14.5 5.5l4 4'/%3E%3C/svg%3E"); }
   .pill .pen:hover { opacity: 1; }
+  /* PC: 카드 이름 아래 태그 (폰은 공간이 좁아 숨김) */
+  .card-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; margin-top: -2px; }
+  .card-tags span { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 18px; }
+  @media (max-width: 520px), (pointer: coarse) { .card-tags { display: none; } }
   .m-in.card-in { padding: 2px 6px; font-size: 13px; border-color: var(--accent); }
   body.editing .card .name:not(.dur-line) { cursor: text; }
   body.editing .card .name:not(.dur-line):hover { text-decoration: underline dotted; }
@@ -1039,14 +1043,18 @@ function videoCard(f) {
   const open = () => isPhone && !canPlayDirect(f) && !document.body.classList.contains('editing')
     ? (location.href = `https://drive.google.com/file/d/${f.id}/view`) : openViewer(f);
   const nameEl = el('div', { className: 'name', textContent: f.name, title: f.name });
-  // 수정 ON: 카드 제목을 누르면 영상 창 대신 그 자리에서 이름 바꾸기
-  nameEl.onclick = e => {
-    if (!document.body.classList.contains('editing')) return;
-    e.stopPropagation();
-    startCardRename(f, nameEl);
+  // 수정 ON: 카드 제목을 누르면 영상 창 대신 그 자리에서 이름 바꾸기.
+  // 사파리·파이어폭스는 버튼 안을 눌러도 버튼 자체가 눌린 것으로 오므로, 누른 위치가 제목 칸 안인지로 판단
+  const onCard = e => {
+    if (cardRenaming || Date.now() - cardRenameEnded < 400) return; // 이름 고치는 중이거나, 다른 곳을 눌러 막 저장한 클릭
+    const r = nameEl.getBoundingClientRect();
+    const inName = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+    if (document.body.classList.contains('editing') && inName && e.detail !== 0) return startCardRename(f, nameEl);
+    open();
   };
-  const card = el('button', { className: 'card', onclick: open },
+  const card = el('button', { className: 'card', onclick: onCard },
     thumb, nameEl,
+    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...tagsOf(f).map(t => el('span', { textContent: t }))) : null, // PC: 이 영상의 태그
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
@@ -1396,27 +1404,35 @@ function startRename(f) {
   input.onblur = () => finish(true);
 }
 
-// 목록 카드의 제목 자리에서 이름 바꾸기 (Enter·다른 곳 클릭 = 저장, Esc = 취소). 카드(버튼)로 클릭·키가 새지 않게 막음
+// 목록 카드의 제목 자리에서 이름 바꾸기 (Enter·다른 곳 클릭 = 저장, Esc = 취소).
+// 입력칸을 카드(버튼) 안에 넣으면 일부 브라우저에서 클릭·입력이 안 되므로, 제목 칸 위에 떠 있는 입력칸으로 띄움(스크롤하면 저장하고 닫힘)
+let cardRenaming = null, cardRenameEnded = 0;
 function startCardRename(f, nameEl) {
-  if (nameEl.querySelector('input')) return;
+  if (cardRenaming) return;
+  const r = nameEl.getBoundingClientRect();
   const input = el('input', { className: 'm-in card-in', value: f.name, spellcheck: false });
-  for (const ev of ['click', 'keyup', 'pointerdown']) input.addEventListener(ev, e => e.stopPropagation());
-  nameEl.replaceChildren(input);
+  Object.assign(input.style, { position: 'fixed', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', zIndex: 40 });
+  document.body.append(input);
+  cardRenaming = input;
   input.focus();
   const dot = f.name.lastIndexOf('.');
   input.setSelectionRange(0, dot > 0 ? dot : f.name.length);
   let done = false;
+  const onScroll = () => input.blur();
+  addEventListener('scroll', onScroll, { passive: true, once: true });
   const finish = async save => {
     if (done) return;
     done = true;
+    removeEventListener('scroll', onScroll);
     const name = input.value.trim();
-    nameEl.textContent = f.name;
+    input.remove();
+    cardRenaming = null;
+    cardRenameEnded = Date.now();
     if (!save || !name || name === f.name) return;
     if (!await ensureWriteScope()) return;
     renameVideo(f, name);
   };
   input.onkeydown = e => {
-    e.stopPropagation();
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
   };
