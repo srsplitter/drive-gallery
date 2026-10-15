@@ -1119,6 +1119,12 @@ viewer.addEventListener('close', () => {
   if (history.state && history.state.viewer) history.back(); // 폰 페이지: 열 때 넣은 기록을 되돌림
 });
 $('#vClose').onclick = () => viewer.close();
+// PC: 창 바깥(어두운 곳)을 누르면 닫힘. 창 안에서 누르고 끌다가 바깥에서 뗀 건(글자 선택 등) 무시
+let downOnBackdrop = false;
+viewer.addEventListener('pointerdown', e => { downOnBackdrop = e.target === viewer; });
+viewer.addEventListener('click', e => {
+  if (e.target === viewer && downOnBackdrop && !viewer.classList.contains('page')) viewer.close();
+});
 // 폰의 뒤로 가기(제스처·버튼)로 영상 페이지 닫기
 addEventListener('popstate', () => { if (viewer.open && !(history.state && history.state.viewer)) viewer.close(); });
 
