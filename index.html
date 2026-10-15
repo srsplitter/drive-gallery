@@ -638,6 +638,13 @@ async function streamReady() {
     return true;
   } catch { return false; }
 }
+// 플레이어를 전체화면으로. 아이폰은 <video> 만 전체화면이 되므로(webkitEnterFullscreen), 드라이브 플레이어면 드라이브에서 열기
+function fullscreen(player, f) {
+  const go = player.requestFullscreen || player.webkitRequestFullscreen || player.webkitEnterFullscreen;
+  if (go) return Promise.resolve(go.call(player)).catch(() => {});
+  window.open(`https://drive.google.com/file/d/${f.id}/view`, '_blank', 'noopener');
+}
+
 // 드라이브 파일을 sw.js 로 필요한 부분만 받아 <video> 로 재생. 준비가 안 되거나 재생 오류면 fallback()
 function directPlayer(f, fallback) {
   const v = el('video', { className: 'frame', controls: true, playsInline: true, preload: 'metadata' });
@@ -697,6 +704,7 @@ function openViewer(f) {
       canCapture ? captureBtn : null,
       imageBtn,
       el('button', { className: 'edit-only', textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
+      el('button', { textContent: '⛶ 전체화면', onclick: () => fullscreen(playerWrap.querySelector('.frame'), f) }),
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     cands,
