@@ -111,6 +111,11 @@
   .v-body { padding: 12px; display: grid; gap: 10px; }
   /* 높이를 화면의 60%로 제한: 폰 가로 화면에서 플레이어가 창을 넘쳐 전체화면 버튼이 가려지지 않게 */
   .frame { width: 100%; aspect-ratio: 16 / 9; max-height: 60dvh; border: 0; background: #000; border-radius: 8px; display: block; }
+  /* 폰: 영상 창 대신 화면 전체를 쓰는 페이지 (왼쪽 위 ← 돌아가기, 영상은 남는 높이를 다 씀) */
+  dialog.page { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; }
+  dialog.page #vClose { order: -1; }
+  dialog.page .v-body { padding: 8px; }
+  dialog.page .frame { aspect-ratio: auto; height: calc(100dvh - 130px); min-height: 180px; max-height: none; object-fit: contain; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
@@ -658,8 +663,13 @@ function directPlayer(f, fallback) {
 }
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
-viewer.addEventListener('close', () => { if (!viewer.open) { closeViewerResources(); prefetchCandidates(); } });
+viewer.addEventListener('close', () => {
+  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); }
+  if (history.state && history.state.viewer) history.back(); // 폰 페이지: 열 때 넣은 기록을 되돌림
+});
 $('#vClose').onclick = () => viewer.close();
+// 폰의 뒤로 가기(제스처·버튼)로 영상 페이지 닫기
+addEventListener('popstate', () => { if (viewer.open && !(history.state && history.state.viewer)) viewer.close(); });
 
 let viewerFile = null;
 
@@ -719,7 +729,11 @@ function openViewer(f) {
       el('button', { textContent: isHidden(f) ? '👁️ 숨김 해제' : '🙈 숨기기', title: '갤러리에서만 숨김 (드라이브 파일은 그대로)',
         onclick: () => { setHidden(f, !isHidden(f)); viewer.close(); } }),
       trashButton(f)));
+  // 폰: 작은 창 대신 화면 전체 페이지 + 왼쪽 위 ← 돌아가기 (뒤로 가기로도 닫힘)
+  viewer.classList.toggle('page', !canCapture);
+  $('#vClose').textContent = canCapture ? '✕' : '← 돌아가기';
   viewer.showModal();
+  if (!canCapture && !(history.state && history.state.viewer)) history.pushState({ viewer: 1 }, '');
   // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 드라이브 시간 조절바가 바로 보임.
   // 불러오는 동안은 대표 장면 뽑기를 잠시 멈춰 플레이어가 인터넷을 먼저 쓰게 함.
   const autoLoad = document.body.classList.contains('editing') && extReady;
