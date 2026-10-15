@@ -75,7 +75,9 @@
   #catbar .catscroll { flex: 1; min-width: 0; }
   .cat-edit { flex: none; margin-right: 12px; padding: 6px 12px; border-radius: 999px; font-size: 14px; }
   .chip.off { opacity: .45; text-decoration: line-through; }
-  .m-body { padding: 12px 14px; display: grid; gap: 14px; }
+  /* align-content: start — 패널이 화면 높이만큼 길어도 칸들이 늘어나지 않고 위에서부터 붙어 쌓이게 */
+  .m-body { padding: 12px 14px; display: grid; gap: 14px; align-content: start; }
+  .m-body .m-big { height: 52px; } /* 검색·랜덤·단 수 버튼 높이 */
   .m-sec { display: grid; gap: 6px; }
   .m-sec > b { font-size: 13px; color: var(--dim); font-weight: 600; }
   .m-in { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
@@ -682,9 +684,9 @@ function renderMenu() {
   textIn.onkeydown = minIn.onkeydown = maxIn.onkeydown = e => { if (e.key === 'Enter') apply(); };
 
   // 단 수(폰, 누를 때마다 1→2→3→4→1) + 랜덤(켜면 섞고, 다시 누르면 가나다순): 누르는 즉시 반영
-  const cols = el('button', { className: 'phone-only', style: 'justify-content:center', textContent: (+document.body.dataset.cols || 2) + '단',
+  const cols = el('button', { className: 'phone-only m-big', style: 'justify-content:center; align-items:center', textContent: (+document.body.dataset.cols || 2) + '단',
     onclick: () => { const n = +document.body.dataset.cols || 2; setCols(n >= 4 ? 1 : n + 1); cols.textContent = document.body.dataset.cols + '단'; } });
-  const rand = el('button', { className: randomRank ? 'on' : '', textContent: '랜덤', title: randomRank ? '다시 누르면 가나다순' : '지금 보이는 영상을 섞기',
+  const rand = el('button', { className: 'm-big' + (randomRank ? ' on' : ''), textContent: '랜덤', title: randomRank ? '다시 누르면 가나다순' : '지금 보이는 영상을 섞기',
     onclick: () => { if (randomRank) { randomRank = null; renderGrid(); } else shuffleShown(); renderMenu(); } });
 
   $('#mBody').replaceChildren(
@@ -694,7 +696,7 @@ function renderMenu() {
     el('div', { className: 'm-sec' }, el('b', { textContent: '길이' }),
       el('div', { className: 'm-time' }, minIn, maxIn, el('span', { className: 'hint', textContent: '분' }))),
     el('div', { className: 'm-sec' }, el('b', { textContent: '카테고리' }), catBox),
-    el('button', { className: 'primary', textContent: '검색', onclick: apply }),
+    el('button', { className: 'primary m-big', textContent: '검색', onclick: apply }),
     el('div', { className: 'm-grid2' }, cols, rand),
     ...(editing ? [bracketTool()] : []).filter(Boolean));
 }
