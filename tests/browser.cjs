@@ -147,6 +147,41 @@ const root = path.resolve(__dirname, '..');
     const genreMemo=page.locator('#directoryMemos .m-sec').filter({has:page.getByText('장르(으)로 이동',{exact:true})});
     await genreMemo.locator('textarea').fill('일반');await genreMemo.locator('textarea').press('Enter');
     assert.equal(await page.evaluate(()=>gallery.tagKinds['일반']),'genre');
+    for (const kind of ['normal','character','category','genre']) {
+      await page.evaluate(kind=>{
+        gallery.tags={a:['찾기대상','제외대상']};gallery.tagKinds={};
+        if(kind!=='normal') for(const t of gallery.tags.a)gallery.tagKinds[t]=kind;
+        currentView=kind;query='';searchOpen=false;filters=EMPTY_FILTERS();renderGrid();
+      },kind);
+      await page.locator('#catbar').getByRole('button',{name:'🔍',exact:true}).click();
+      assert.equal(await page.evaluate(()=>currentView),kind,'search keeps '+kind);
+      await page.locator('#catbar input').fill('찾기');await page.waitForTimeout(200);
+      assert.equal(await page.locator('#grid .pill').count(),1);
+      assert.equal(await page.locator('#grid .card').count(),0);
+      await page.locator('#catbar input').fill('없는이름');await page.waitForTimeout(200);
+      assert.equal(await page.locator('#grid .pill').count(),0);
+      await page.locator('#catbar input').press('Escape');
+      assert.equal(await page.evaluate(()=>currentView),kind);
+      assert.equal(await page.locator('#grid .pill').count(),2);
+    }
+    await page.evaluate(()=>{
+      gallery.tags={a:['MixedCASE'],b:['MixedCASE']};gallery.tagKinds={MixedCASE:'genre'};
+      currentView='';query='';searchOpen=false;filters=EMPTY_FILTERS();renderGrid();
+    });
+    await page.locator('#catbar').getByRole('button',{name:'🔍',exact:true}).click();
+    await page.locator('#catbar input').fill('mixed');
+    await page.locator('#catbar').getByRole('button',{name:'장르',exact:true}).click();
+    assert.equal(await page.evaluate(()=>query),'mixed');
+    assert.equal(await page.locator('#grid .pill').count(),1);
+    assert.ok((await page.locator('#catbar input').getAttribute('placeholder')).includes('장르'));
+    await page.locator('#grid .pill').click();
+    assert.equal(await page.evaluate(()=>query),'');
+    assert.equal(await page.locator('#grid .card').count(),2);
+    await page.evaluate(()=>{filters=EMPTY_FILTERS();renderGrid();});
+    await page.locator('#catbar').getByRole('button',{name:'🔍',exact:true}).click();
+    await page.locator('#catbar input').fill('b.mp4');await page.waitForTimeout(200);
+    assert.deepEqual(await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id)),['b']);
+    await page.locator('#catbar input').press('Escape');
     await page.setViewportSize({width:1280,height:900});
     await page.evaluate(()=>{
       const thumb=(w,h,color)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,w,h);return {thumb:c.toDataURL(),at:'test'};};

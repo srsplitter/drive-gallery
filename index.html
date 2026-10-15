@@ -1207,7 +1207,12 @@ function directoryTabs() {
   return directoryKinds.map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
-      onclick: () => { clearTimeout(searchTimer); currentView = currentView === kind ? '' : kind; renderGrid(); }
+      onclick: () => {
+        if (searchOpen) query = $('#catbar').querySelector('.search').value.trim().toLowerCase();
+        clearTimeout(searchTimer);
+        currentView = currentView === kind ? '' : kind;
+        renderGrid();
+      }
     });
     b.setAttribute('aria-pressed', String(currentView === kind));
     return b;
@@ -1218,6 +1223,7 @@ function renderCatbar() {
   bar.hidden = false;
   if (searchOpen) {
     const strip = bar.querySelector('.catscroll');
+    strip.querySelector('.search').placeholder = searchPlaceholder();
     for (const b of strip.querySelectorAll('[aria-pressed]')) b.remove();
     strip.append(...directoryTabs());
     return updateSticky();
@@ -1229,7 +1235,7 @@ function renderCatbar() {
 }
 function renderDirectory() {
   const editing = document.body.classList.contains('editing'), counts = tagCounts();
-  const tags = [...counts.keys()].filter(t => tagKind(t) === currentView).sort(window.GalleryOrder.compareText);
+  const tags = [...counts.keys()].filter(t => tagKind(t) === currentView && (!query || t.toLowerCase().includes(query))).sort(window.GalleryOrder.compareText);
   $('#grid').replaceChildren(el('div', { className: 'pills tag-directory' }, ...tags.map(t => pill(t, counts.get(t), {
     onclick: () => {
       clearTimeout(searchTimer);
@@ -1276,12 +1282,15 @@ function renderDirectory() {
   }));
 }
 
+function searchPlaceholder() {
+  return currentView ? directoryKinds.find(([kind]) => kind === currentView)[1] + ' 이름 검색' : '파일 이름 검색';
+}
+
 function openSearch() {
   clearTimeout(searchTimer);
-  currentView = '';
   renderGrid();
   searchOpen = true;
-  const input = el('input', { className: 'search', type: 'search', placeholder: '파일 이름 검색', value: query, enterKeyHint: 'search' });
+  const input = el('input', { className: 'search', type: 'search', placeholder: searchPlaceholder(), value: query, enterKeyHint: 'search' });
   input.oninput = () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
