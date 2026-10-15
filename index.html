@@ -51,13 +51,7 @@
   #editNote[hidden] { display: none; }
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
-  .seek-bar { flex: 1; accent-color: var(--accent); }
   .row.end { justify-content: flex-end; }
-  .seek-row { position: relative; }
-  .seek-tip { position: absolute; bottom: calc(100% + 4px); transform: translateX(-50%); z-index: 3; pointer-events: none;
-    background: #000; border: 1px solid var(--line); border-radius: 8px; padding: 3px; display: grid; gap: 2px; text-align: center; }
-  .seek-tip img { display: block; width: 200px; height: auto; border-radius: 5px; }
-  .seek-tip span { font-size: 12px; font-variant-numeric: tabular-nums; }
   button.danger { background: #c62828; border-color: #c62828; color: #fff; }
   body.editing #vTitle { cursor: text; }
   body.editing #vTitle:hover { text-decoration: underline dotted; }
@@ -419,11 +413,12 @@ const viewer = $('#viewer');
 let viewerAbort = null;
 let viewerUI = null; // 지금 열린 영상 창의 { captureBtn, imageBtn }
 
-let viewerPoll = null; // 시간 조절바 갱신 타이머
+
+let playerLoading = false; // 영상 창의 플레이어가 자동으로 불러오는 중 (대표 장면 뽑기 잠시 멈춤)
 
 function closeViewerResources() {
+  playerLoading = false;
   if (viewerAbort) { viewerAbort.abort(); viewerAbort = null; }
-  clearInterval(viewerPoll);
   restorePending = null;
   // 스트리밍 중인 영상의 추가 다운로드 중단
   for (const v of $('#vBody').querySelectorAll('video')) { v.removeAttribute('src'); v.load(); }
@@ -471,13 +466,8 @@ function openViewer(f) {
   viewerUI = { captureBtn, imageBtn, playerWrap };
   // 확장 프로그램이 있으면 드라이브 플레이어를 직접 조작하는 버튼 (수정 모드에서)
   const playerState = el('span', { className: 'time' }); // ⏸/▶ 와 현재 시간 / 전체 길이
-  // 항상 보이는 시간 조절바 (드라이브 플레이어 조절바는 숨었다 나왔다 하므로)
-  const seekBar = el('input', { type: 'range', min: 0, max: 0, step: 0.1, value: 0, disabled: true, className: 'seek-bar' });
-  let dragging = false, seekTimer = null;
   const cands = el('div', { className: 'cands edit-only' }); // 대표 장면 5개
   const showState = r => {
-    if (r.duration) { seekBar.max = r.duration; seekBar.disabled = false; }
-    if (!dragging) seekBar.value = r.time;
     playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time) + (r.duration ? ' / ' + fmtTime(r.duration) : '');
   };
   const send = (action, delta) => extCall('player', { action, delta })
@@ -487,22 +477,8 @@ function openViewer(f) {
   const pc = (label, action, delta) => action === 'seek'
     ? holdRepeat(el('button', { textContent: label }), () => send(action, delta))
     : el('button', { textContent: label, onclick: () => send(action, delta) });
-  const seekTo = () => extCall('player', { action: 'seekTo', delta: +seekBar.value }).then(showState).catch(() => {});
-  seekBar.oninput = () => {
-    dragging = true;
-    playerState.textContent = '⏸ ' + fmtTenth(+seekBar.value);
-    if (!seekTimer) seekTimer = setTimeout(() => { seekTimer = null; seekTo(); }, 120); // 끄는 동안 0.12초마다 이동
-  };
-  seekBar.onchange = () => { dragging = false; clearTimeout(seekTimer); seekTimer = null; seekTo(); };
-  // 영상이 재생되면서 움직이는 시간을 1초마다 반영 (수정 모드 + 확장 있을 때만)
-  viewerPoll = setInterval(() => {
-    if (!dragging && viewer.open && document.body.classList.contains('editing') && extReady) {
-      extCall('player', { action: 'state' }).then(showState).catch(() => {});
-    }
-  }, 1000);
   $('#vBody').replaceChildren(
     playerWrap,
-    seekPreview(f, seekBar, el('div', { className: 'row edit-only ext-only seek-row' }, seekBar)),
     el('div', { className: 'row edit-only ext-only' },
       pc('⏯ 재생/멈춤', 'toggle'), pc('-1초', 'seek', -1), pc('-1프레임', 'seek', -1 / 30),
       pc('+1프레임', 'seek', 1 / 30), pc('+1초', 'seek', 1), playerState),
@@ -521,29 +497,35 @@ function openViewer(f) {
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }),
     el('div', { className: 'row end edit-only' }, trashButton(f)));
   viewer.showModal();
-  // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 시간 조절바가 바로 보임.
-  // 플레이어가 준비되는 데 시간이 걸려 1.2초 뒤부터 확인하고, 아직이면 재생 버튼을 다시 누름(최대 4번)
+  // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 드라이브 시간 조절바가 바로 보임.
+  // 불러오는 동안은 대표 장면 뽑기를 잠시 멈춰 플레이어가 인터넷을 먼저 쓰게 함.
+  const autoLoad = document.body.classList.contains('editing') && extReady;
+  if (autoLoad) playerLoading = true;
   iframe.addEventListener('load', async () => {
     // 0.3초마다 확인. 유튜브 플레이어가 준비되면 바로 재생 명령(여러 번 보내도 무해).
     // 플레이어를 못 찾아 화면을 클릭한 경우엔 재생/멈춤이 번갈아 걸리지 않게 2.5초 기다렸다 다시.
     let clicked = '', lastKick = 0, lastWasClick = false;
     const t0 = Date.now();
-    while (Date.now() - t0 < 12000) {
-      await new Promise(r => setTimeout(r, 300));
-      if (!viewer.open || viewerFile !== f || !extReady || !document.body.classList.contains('editing')) return;
-      const st = await extCall('player', { action: 'state' }).catch(() => null);
-      if (st && st.duration) { // 불러와짐 (음소거로 자동 재생했으면 소리 다시 켬)
-        if (clicked) extCall('player', { action: 'unmute' }).catch(() => {});
-        return showState(st);
+    try {
+      while (Date.now() - t0 < 12000) {
+        await new Promise(r => setTimeout(r, 300));
+        if (!viewer.open || viewerFile !== f || !extReady || !document.body.classList.contains('editing')) return;
+        const st = await extCall('player', { action: 'state' }).catch(() => null);
+        if (st && st.duration) { // 불러와짐 (음소거로 자동 재생했으면 소리 다시 켬)
+          if (clicked) extCall('player', { action: 'unmute' }).catch(() => {});
+          return showState(st);
+        }
+        if (Date.now() - lastKick < (lastWasClick ? 2500 : 600)) continue;
+        const k = await extCall('player', { action: 'kick' }).catch(e => ({ clicked: e.message }));
+        lastKick = Date.now();
+        clicked = k.clicked || clicked;
+        lastWasClick = !/유튜브 플레이어/.test(k.clicked || '');
       }
-      if (Date.now() - lastKick < (lastWasClick ? 2500 : 600)) continue;
-      const k = await extCall('player', { action: 'kick' }).catch(e => ({ clicked: e.message }));
-      lastKick = Date.now();
-      clicked = k.clicked || clicked;
-      lastWasClick = !/유튜브 플레이어/.test(k.clicked || '');
+      // 진단: 무엇을 눌렀는지·확장 버전을 보여줌
+      showPreviewMessage(`자동 재생이 안 됐어요. 영상을 직접 한 번 눌러 주세요. (확장 v${extVersion || '?'} · 누른 곳: ${clicked || '없음'})`);
+    } finally {
+      if (viewerFile === f) playerLoading = false;
     }
-    // 진단: 무엇을 눌렀는지·확장 버전을 보여줌
-    showPreviewMessage(`자동 재생이 안 됐어요. 영상을 직접 한 번 눌러 주세요. (확장 v${extVersion || '?'} · 누른 곳: ${clicked || '없음'})`);
   }, { once: true });
   // 대표 장면: 수정 ON 이면 바로, 창을 연 채 수정을 켜면 그때 (미리 뽑아 둔 게 있으면 즉시 보임)
   viewerUI.startCands = () => { if (!cands.hasChildNodes()) showCandidates(f, iframe, cands, captureBtn); };
@@ -695,92 +677,6 @@ function getMp4(f) {
   return mp4s.get(f.id);
 }
 
-// 키프레임(장면 사이 간격마다 있는 독립 프레임) 목록: 시각 순 [{i, t}]
-function syncList(src) {
-  if (!src.syncs) {
-    src.syncs = src.samples.map((s, i) => ({ i, t: s.cts / src.timescale, sync: s.is_sync }))
-      .filter(x => x.sync).sort((a, b) => a.t - b.t);
-  }
-  return src.syncs;
-}
-// t초 이전의 가장 가까운 키프레임
-function syncAt(src, t) {
-  const list = syncList(src);
-  let lo = 0, hi = list.length - 1;
-  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (list[mid].t <= t) lo = mid; else hi = mid - 1; }
-  return list[lo];
-}
-
-// ---------- 시간 조절바 미리보기 ----------
-// 사이트 시간 조절바에 마우스를 올리면 그 지점의 작은 장면과 시간을 띄움.
-// 키프레임만 받아 풀어서 빠르고 가벼움: 창을 열면 24곳을 미리 만들고, 올린 곳은 그 자리 키프레임을 먼저 가져옴.
-function seekPreview(f, seekBar, row) {
-  const img = el('img', { alt: '' }), label = el('span');
-  const tip = el('div', { className: 'seek-tip', hidden: true }, img, label);
-  row.append(tip);
-  const thumbs = new Map(); // 키프레임 샘플 번호 → 작은 이미지(data URL) / null(실패)
-  const pre = [];
-  let src = null, hoverKey = null, running = false, lastT = 0, started = false;
-  // 수정 ON 으로 창을 열었거나, 처음 마우스를 올렸을 때 시작 (보기 모드에선 받지 않음)
-  const init = () => {
-    if (started) return;
-    started = true;
-    getMp4(f).then(s => {
-      src = s;
-      if (!s) return;
-      for (let i = 0; i < 24; i++) { const k = syncAt(s, (i + 0.5) / 24 * s.duration); if (!pre.includes(k)) pre.push(k); }
-      work();
-    }).catch(() => { started = false; });
-  };
-  if (document.body.classList.contains('editing')) init();
-
-  const show = t => {
-    label.textContent = fmtTime(t);
-    if (!src) { img.hidden = true; return; }
-    // 그 지점 키프레임이 아직이면 이미 만든 것 중 시간이 가장 가까운 것
-    const want = syncAt(src, t);
-    let best = thumbs.get(want.i) ? want : null;
-    if (!best) for (const k of syncList(src)) if (thumbs.get(k.i) && (!best || Math.abs(k.t - t) < Math.abs(best.t - t))) best = k;
-    img.hidden = !best;
-    if (best) img.src = thumbs.get(best.i);
-  };
-
-  async function work() {
-    if (running) return;
-    running = true;
-    try {
-      for (;;) {
-        if (!row.isConnected || !src) return;
-        let k = hoverKey && !thumbs.has(hoverKey.i) ? hoverKey : null;
-        while (!k && pre.length) { const p = pre.shift(); if (!thumbs.has(p.i)) k = p; }
-        if (!k) return;
-        try {
-          const { frame } = await extractFrame(src, k.t, new AbortController().signal, true);
-          const c = el('canvas');
-          drawFrame(c, frame, src.rotation);
-          frame.close();
-          thumbs.set(k.i, capture(c, c.width, c.height, 240));
-        } catch { thumbs.set(k.i, null); }
-        if (!tip.hidden) show(lastT);
-      }
-    } finally { running = false; }
-  }
-
-  seekBar.addEventListener('mousemove', e => {
-    init();
-    if (seekBar.disabled || !+seekBar.max) return;
-    const r = seekBar.getBoundingClientRect(), rowR = row.getBoundingClientRect();
-    const ratio = Math.min(Math.max(0, (e.clientX - r.left) / r.width), 1);
-    lastT = ratio * +seekBar.max;
-    tip.style.left = e.clientX - rowR.left + 'px';
-    tip.hidden = false;
-    show(lastT);
-    if (src) { hoverKey = syncAt(src, lastT); work(); }
-  });
-  seekBar.addEventListener('mouseleave', () => { tip.hidden = true; hoverKey = null; });
-  return row;
-}
-
 // ---------- 대표 장면 5개 (영상 길이의 25·33·50·66·75%) ----------
 // 드라이브 영상 파일에서 직접 뽑는다(그 지점 근처만 받음). 보고 있는 플레이어는 건드리지 않음.
 // 수정 ON 이면 지금 폴더 순서에서 아직 썸네일을 안 정한 앞쪽 영상 2개를 미리 뽑아 두고,
@@ -835,6 +731,8 @@ async function extractCandidates(j) {
   let made = 0;
   for (const [i, p] of CAND_POINTS.entries()) {
     if (signal.aborted) throw new DOMException('중단', 'AbortError');
+    // 영상 창의 플레이어가 불러오는 중이면 기다림 (최대 12초)
+    for (let w = 0; playerLoading && w < 60; w++) await new Promise(r => setTimeout(r, 200));
     try {
       const { frame, t } = await extractFrame(src, p * src.duration, signal, true);
       const c = el('canvas');
