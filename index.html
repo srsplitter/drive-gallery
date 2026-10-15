@@ -290,6 +290,21 @@
 .card.order-dragging { opacity: .45; }
 .card.order-before { box-shadow: -5px 0 0 #e5b94c; }
 .card.order-after { box-shadow: 5px 0 0 #e5b94c; }
+  .directory-item { min-width: 0; max-width: 100%; }
+  .cover-thumb { display: inline-flex; flex: none; width: 80px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: var(--bg); align-items: center; justify-content: center; vertical-align: middle; }
+  .cover-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .cover-candidates { display: flex; flex-wrap: wrap; gap: 8px; max-width: min(720px, calc(100vw - 48px)); padding: 10px 0; }
+  .cover-candidate { padding: 3px; border-radius: 8px; }
+  .cover-candidate.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .series-open { display: inline-flex; align-items: center; gap: 10px; }
+  .series-row > .cover-thumb { margin: 0 8px; }
+  .title-memos { margin-bottom: 20px; }
+  .title-memos textarea { min-height: 94px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); color: var(--text); font: inherit; }
+  .title-memos label { display: block; margin-bottom: 8px; }
+  .title-memos button { margin: 0 6px 6px 0; }
+  body.editing #titleEditor .card .name { cursor: pointer; }
+  body.editing #titleEditor .card .name:hover { text-decoration: none; }
+  .catscroll > [hidden] { display: none !important; }
 </style>
 </head>
 <body>
@@ -347,6 +362,8 @@
 <script src="manual-order.js"></script>
 <script src="series.js"></script>
 <script src="series-ui.js"></script>
+<script src="title-editor.js"></script>
+<script src="directory-thumbs.js"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -550,7 +567,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -579,11 +596,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -782,6 +799,7 @@ function pill(t, count, { onclick, onStar, on, onRename, onDelete, confirm } = {
 // 태그를 모든 영상에서 지움 (즐겨찾기·필터 기록·검색 조건에서도)
 function deleteTag(t) {
   if (!document.body.classList.contains('editing')) return;
+  if (gallery.covers && gallery.covers['tag:' + t]) { delete gallery.covers['tag:' + t]; pendingSaves.set('p:tag:' + t, null); }
   delete gallery.tagKinds[t];
   pendingSaves.set('k:' + t, null);
   for (const f of items) {
@@ -825,6 +843,10 @@ function editTagInline(p, t, after) {
 // 태그 이름 바꾸기: 그 태그가 붙은 모든 영상에 적용(이미 새 이름이 붙어 있으면 하나로 합침). 즐겨찾기·검색 조건도 따라감
 function renameTag(from, to) {
   if (!document.body.classList.contains('editing')) return;
+  if (gallery.covers && gallery.covers['tag:' + from]) {
+    if (!gallery.covers['tag:' + to]) { gallery.covers['tag:' + to] = gallery.covers['tag:' + from]; pendingSaves.set('p:tag:' + to, gallery.covers['tag:' + to]); }
+    delete gallery.covers['tag:' + from]; pendingSaves.set('p:tag:' + from, null);
+  }
   const kind = tagKind(from);
   delete gallery.tagKinds[from];
   pendingSaves.set('k:' + from, null);
@@ -1216,15 +1238,18 @@ function renderGrid() {
   if (nf) $('#crumbs').append(el('button', { className: 'small', textContent: `🔎 조건 ${nf}개 ✕`, title: '검색 조건 지우기',
     onclick: () => { filters = EMPTY_FILTERS(); menuDraft = null; renderGrid(); if (menu.open) renderMenu(); } }));
   const counts = tagCounts();
-  const filtered = visible.filter(f => (currentView === 'series' || !query || f.name.toLowerCase().includes(query)) && matchesFilters(f));
+  const filtered = visible.filter(f => (currentView === 'series' || !query || f.name.toLowerCase().includes(query)
+    || (currentView === 'title' && tagsOf(f).some(t => t.toLowerCase().includes(query)))) && matchesFilters(f));
   shown = window.GalleryOrder.sortVideos(filtered, { ...gallery, loved: {} }, items);
   shown = ManualOrderUI.sorted(shown, 'regular');
   if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
   shown = window.GallerySeries.arrange(shown, gallery.series);
+  if (currentView === 'title') shown = TitleEditor.filter(shown);
   $('#bulkTag').hidden = !!currentView;
-  $('#directoryMemos').hidden = !currentView || currentView === 'series';
+  $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title';
   renderBulk();
   if (currentView === 'series') $('#grid').replaceChildren(SeriesUI.library());
+  else if (currentView === 'title') $('#grid').replaceChildren(TitleEditor.render(shown, counts));
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
@@ -1246,7 +1271,7 @@ function renderGrid() {
   else setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
   renderCatbar();
   if (viewer.open && viewerFile) SeriesUI.viewerNav(viewerFile);
-  if (SeriesUI.mode || currentView === 'series') $('#editNote').hidden = true;
+  if (SeriesUI.mode || currentView === 'series' || currentView === 'title') $('#editNote').hidden = true;
   if (SeriesUI.mode) setStatus('시리즈 지정: 썸네일을 재생 순서대로 누른 뒤 저장하세요.');
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -1257,7 +1282,7 @@ const directoryKinds = [['normal', '태그'], ['category', '카테고리'], ['ge
 const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
 function directoryTabs() {
-  return [...directoryKinds, ['series', '시리즈']].map(([kind, label]) => {
+  return [...directoryKinds, ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
@@ -1275,9 +1300,13 @@ function directoryTabs() {
 function renderCatbar() {
   const bar = $('#catbar');
   bar.hidden = false;
+  if (currentView === 'title') searchOpen = true;
   if (searchOpen) {
+    if (!bar.querySelector('.search')) { buildSearchBar(false); return updateSticky(); }
     const strip = bar.querySelector('.catscroll');
     strip.querySelector('.search').placeholder = searchPlaceholder();
+    const close = strip.querySelector('[title="검색 닫기"]');
+    if (close) close.hidden = currentView === 'title';
     for (const b of strip.querySelectorAll('[aria-pressed]')) b.remove();
     strip.append(...directoryTabs());
     bar.querySelector('.series-actions').replaceWith(SeriesUI.toolbar());
@@ -1291,8 +1320,9 @@ function renderCatbar() {
 function renderDirectory() {
   const editing = document.body.classList.contains('editing'), counts = tagCounts();
   const tags = [...counts.keys()].filter(t => tagKind(t) === currentView && (!query || t.toLowerCase().includes(query))).sort(window.GalleryOrder.compareText);
-  $('#grid').replaceChildren(el('div', { className: 'pills tag-directory' }, ...tags.map(t => pill(t, counts.get(t), {
+  $('#grid').replaceChildren(el('div', { className: 'pills tag-directory' }, ...tags.map(t => DirectoryThumbs.item('tag:' + t, pill(t, counts.get(t), {
     onclick: () => {
+      if (document.body.classList.contains('editing')) { DirectoryThumbs.toggle('tag:' + t); renderGrid(); return; }
       clearTimeout(searchTimer);
       currentView = '';
       query = '';
@@ -1306,7 +1336,7 @@ function renderDirectory() {
     onStar: editing ? () => { toggleFav(t); renderGrid(); } : null,
     onRename: editing ? renderGrid : null,
     onDelete: editing ? () => deleteTag(t) : null, confirm: true
-  }))));
+  }), items.filter(f => tagsOf(f).includes(t))))));
   const memos = $('#directoryMemos');
   if (memos.dataset.view === currentView) return; // 같은 목록에서는 입력 중인 메모와 포커스를 유지
   memos.dataset.view = currentView;
@@ -1338,6 +1368,7 @@ function renderDirectory() {
 }
 
 function searchPlaceholder() {
+  if (currentView === 'title') return '통합 검색 · 제목 또는 태그';
   if (currentView === 'series') return '시리즈 이름 검색';
   return currentView ? directoryKinds.find(([kind]) => kind === currentView)[1] + ' 이름 검색' : '파일 이름 검색';
 }
@@ -1346,6 +1377,9 @@ function openSearch() {
   clearTimeout(searchTimer);
   renderGrid();
   searchOpen = true;
+  buildSearchBar(true);
+}
+function buildSearchBar(focus) {
   const input = el('input', { className: 'search', type: 'search', placeholder: searchPlaceholder(), value: query, enterKeyHint: 'search' });
   input.oninput = () => {
     clearTimeout(searchTimer);
@@ -1359,14 +1393,15 @@ function openSearch() {
   };
   input.onkeydown = e => { if (e.key === 'Escape') closeSearch(); };
   $('#catbar').replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', onclick: closeSearch }), input, ...directoryTabs()), SeriesUI.toolbar());
-  input.focus();
+    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', hidden: currentView === 'title', onclick: closeSearch }), input, ...directoryTabs()), SeriesUI.toolbar());
+  if (focus) input.focus();
 }
 
 function closeSearch() {
   clearTimeout(searchTimer);
-  searchOpen = false;
+  searchOpen = currentView === 'title';
   query = '';
+  if (currentView === 'title' && $('#catbar .search')) $('#catbar .search').value = '';
   setStatus('');
   renderGrid();
 }

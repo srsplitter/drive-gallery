@@ -12,6 +12,9 @@ const SeriesUI = (() => {
   function store(id, value) {
     if (!editing()) return;
     if (value) gallery.series[id] = value; else delete gallery.series[id];
+    if (!value && gallery.covers && gallery.covers['series:' + id]) {
+      delete gallery.covers['series:' + id]; pendingSaves.set('p:series:' + id, null);
+    }
     pendingSaves.set('s:' + id, value);
     renderGrid(); flushSaves();
   }
@@ -119,7 +122,12 @@ const SeriesUI = (() => {
     const entries = Object.entries(saved()).filter(([, s]) => !query || s.name.toLowerCase().includes(query));
     for (const [id, s] of entries) {
       const title = el('button', { className: 'series-open', textContent: s.name + ' · ' + members(id).length + '개',
-        onclick: () => { selectedId = selectedId === id ? null : id; orderDraft = null; renderGrid(); } });
+        onclick: () => {
+          if (editing() && typeof DirectoryThumbs !== 'undefined') {
+            DirectoryThumbs.toggle('series:' + id); renderGrid(); return;
+          }
+          selectedId = selectedId === id ? null : id; orderDraft = null; renderGrid();
+        } });
       const pen = el('button', { className: 'edit-only', textContent: '수정', title: '시리즈 이름 수정', onclick: () => rename(id, title) });
       pen.setAttribute('aria-label', '시리즈 이름 수정: ' + s.name);
       const order = el('button', { className: 'edit-only', textContent: '순서 수정', onclick: () => {
@@ -134,7 +142,10 @@ const SeriesUI = (() => {
         clearTimeout(timer); if (selectedId === id) selectedId = null; orderDraft = null; store(id, null);
       };
       const row = el('div', { className: 'series-row' + (selectedId === id ? ' active' : '') }, title, pen, order, bin);
-      row.dataset.seriesId = id; rows.append(row);
+      row.dataset.seriesId = id;
+      const memberIds = new Set(members(id));
+      rows.append(typeof DirectoryThumbs === 'undefined' ? row :
+        DirectoryThumbs.item('series:' + id, row, items.filter(f => memberIds.has(f.id))));
     }
     list.append(rows);
     if (!entries.length) list.append(el('p', { className: 'hint', textContent: query ? '일치하는 시리즈가 없어요.' : '저장한 시리즈가 없어요. 수정 ON에서 시리즈 지정으로 만들어 주세요.' }));
