@@ -403,6 +403,9 @@ function showLoggedOut(msg) {
   $('#authBtn').textContent = '로그아웃';
   sessionStorage.removeItem('tok');
   caches.delete(GCACHE).catch(() => {}); // 이 브라우저에 둔 gallery.json 사본도 지움
+  caches.delete(TCACHE).catch(() => {}); // 받아 둔 썸네일 이미지도
+  thumbUrls.clear();
+  thumbReady.clear();
   if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({});
   $('#grid').replaceChildren();
   $('#login').hidden = false;
@@ -478,16 +481,18 @@ async function api(url, opts = {}) {
 }
 
 // ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
-// gallery.json: { videos: { 영상ID: 지정 썸네일 }, hidden: { 영상ID: true(갤러리에서만 숨김) },
+// gallery.json: { videos: { 영상ID: { t, at, file } }, hidden: { 영상ID: true(갤러리에서만 숨김) },
 //                 tags: { 영상ID: [태그…] }, fav: { 태그: true(즐겨찾기) }, hiddenCats: { 카테고리: true(표시 안 함) } }
+// 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
+// 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
+// (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
 let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
 let saving = false, saveError = '', retryTimer = null;
 
-// gallery.json 은 지정 썸네일(이미지)을 품고 있어 커질 수 있으므로, 이 브라우저에 사본을 두고
-// 드라이브의 파일 지문(md5)이 같으면 다시 받지 않는다 (로그아웃하면 지움)
+// gallery.json 은 이 브라우저에 사본을 두고 드라이브의 파일 지문(md5)이 같으면 다시 받지 않는다 (로그아웃하면 지움)
 const GCACHE = 'gallery-json';
 async function cacheGet() {
   try { const r = await (await caches.open(GCACHE)).match('gallery.json'); return r ? await r.json() : null; } catch { return null; }
@@ -521,6 +526,85 @@ function applyChanges(data, changes) {
     const [map, id] = m ? [data[m], key.slice(2)] : [data.videos, key];
     if (val) map[id] = val; else delete map[id];
   }
+}
+
+// ---------- 지정 썸네일 이미지 파일 ----------
+const TCACHE = 'gallery-thumbs'; // 받은 썸네일 이미지 (파일 ID 마다 내용이 안 바뀌므로 지울 때까지 그대로 씀)
+const THUMB_BATCH = 20; // 한 번 저장할 때 올리는 썸네일 수 (옛 gallery.json 을 옮길 때 끊어서 → 중간에 닫아도 거기까지는 저장)
+const migrateQueue = new Set(); // 아직 gallery.json 안에 이미지가 들어 있는 영상 ID
+const uploaded = new Map(); // 올렸지만 gallery.json 엔 아직 못 쓴 썸네일 → 파일 ID (저장을 다시 시도할 때 또 올리지 않게)
+const thumbUrls = new Map(); // 파일 ID → Promise<blob URL>
+const thumbReady = new Map(); // 파일 ID → blob URL (이미 받은 것은 카드를 다시 그릴 때 바로 붙임)
+const isInline = v => !!(v && v.thumb);
+const thumbKey = (id, v) => `${id}|${v.at}|${v.thumb.length}`;
+
+function rememberThumb(file, blob) {
+  const u = URL.createObjectURL(blob);
+  thumbReady.set(file, u);
+  thumbUrls.set(file, Promise.resolve(u));
+}
+
+// 동시에 6개까지만 받음
+let thumbBusy = 0;
+const thumbWait = [];
+function limited(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      thumbBusy++;
+      fn().then(resolve, reject).finally(() => { thumbBusy--; if (thumbWait.length) thumbWait.shift()(); });
+    };
+    if (thumbBusy < 6) run(); else thumbWait.push(run);
+  });
+}
+
+function thumbUrl(file) {
+  if (!thumbUrls.has(file)) {
+    const p = (async () => {
+      const key = 'thumb/' + file;
+      let blob = null;
+      try { const r = await (await caches.open(TCACHE)).match(key); if (r) blob = await r.blob(); } catch {}
+      if (!blob) {
+        blob = await limited(async () => (await api(`${DRIVE}/files/${file}?alt=media`)).blob());
+        caches.open(TCACHE).then(c => c.put(key, new Response(blob))).catch(() => {});
+      }
+      rememberThumb(file, blob);
+      return thumbReady.get(file);
+    })();
+    p.catch(() => thumbUrls.delete(file)); // 실패하면 다음에 다시
+    thumbUrls.set(file, p);
+  }
+  return thumbUrls.get(file);
+}
+
+// 카드 썸네일은 화면 근처에 왔을 때 받음
+const thumbLoaders = new WeakMap();
+const thumbObserver = new IntersectionObserver(es => {
+  for (const e of es) if (e.isIntersecting) { thumbObserver.unobserve(e.target); thumbLoaders.get(e.target)(); }
+}, { rootMargin: '800px 0px' });
+function lazyThumb(img, file) {
+  if (thumbReady.has(file)) return void (img.src = thumbReady.get(file));
+  thumbLoaders.set(img, () => thumbUrl(file).then(u => { img.src = u; }, () => img.onerror()));
+  thumbObserver.observe(img);
+}
+
+// 이미지(data URL) → 앱 폴더의 새 파일. 파일 ID 를 돌려줌
+async function uploadThumb(videoId, entry) {
+  const key = thumbKey(videoId, entry);
+  if (uploaded.has(key)) return uploaded.get(key);
+  const blob = await (await fetch(entry.thumb)).blob();
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify({ name: `thumb-${videoId}.jpg`, parents: ['appDataFolder'] })], { type: 'application/json' }));
+  form.append('file', blob);
+  const { id } = await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', body: form })).json();
+  uploaded.set(key, id);
+  rememberThumb(id, blob); // 방금 올린 건 다시 받지 않음
+  caches.open(TCACHE).then(c => c.put('thumb/' + id, new Response(blob))).catch(() => {});
+  return id;
+}
+
+async function pool(list, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, list.length) }, async () => { while (i < list.length) await fn(list[i++]); }));
 }
 
 // ---------- 태그 (영상마다 알약, ★ 즐겨찾기) ----------
@@ -649,6 +733,7 @@ function setHidden(f, on) {
 async function loadGallery() {
   ({ fileId: galleryFileId, data: gallery } = await readRemote());
   applyChanges(gallery, pendingSaves); // 아직 저장 중인 변경은 화면에 그대로 유지
+  for (const [id, v] of Object.entries(gallery.videos)) if (isInline(v) && !pendingSaves.has(id)) migrateQueue.add(id);
 }
 
 // 썸네일 변경(entry 가 null 이면 지정 해제): 화면엔 바로 반영하고, 드라이브 저장은 뒤에서 순서대로 처리
@@ -661,14 +746,27 @@ function saveEntry(fileId, entry) {
 
 // 대기 중인 변경을 한 번에 모아 저장. 저장 중에 새로 들어온 변경은 끝난 뒤 이어서 저장.
 async function flushSaves() {
-  if (saving || !pendingSaves.size) return renderSaveState();
+  if (saving || (!pendingSaves.size && !migrateQueue.size)) return renderSaveState();
   saving = true;
   clearTimeout(retryTimer);
   renderSaveState();
-  const batch = new Map(pendingSaves);
+  // 새 썸네일이 든 변경은 한 번에 THUMB_BATCH 개까지만 (나머지는 이어서 저장)
+  let n = 0;
+  const batch = new Map([...pendingSaves].filter(([, v]) => !isInline(v) || ++n <= THUMB_BATCH));
   try {
     const { fileId, data } = await readRemote(); // 다른 기기에서 바뀐 내용을 덮어쓰지 않도록 최신본 위에 반영
-    applyChanges(data, batch);
+    // 옛 방식(이미지 통째) 항목은 파일로 옮김 — 다른 기기의 옛 화면이 넣은 것도. 그새 바뀐 항목은 건너뜀
+    for (const [id, v] of Object.entries(data.videos)) if (isInline(v) && !pendingSaves.has(id)) migrateQueue.add(id);
+    for (const id of migrateQueue) if (pendingSaves.has(id) || !isInline(data.videos[id])) migrateQueue.delete(id);
+    const migrate = [...migrateQueue].slice(0, Math.max(0, THUMB_BATCH - Math.min(n, THUMB_BATCH)));
+    const oldFiles = Object.fromEntries(Object.entries(data.videos).map(([id, v]) => [id, v && v.file]));
+    const changes = new Map(batch), used = [];
+    const jobs = [...batch].filter(([, v]) => isInline(v)).concat(migrate.map(id => [id, data.videos[id]]));
+    await pool(jobs, 4, async ([id, v]) => {
+      changes.set(id, { t: v.t, at: v.at, file: await uploadThumb(id, v) });
+      used.push(thumbKey(id, v));
+    });
+    applyChanges(data, changes);
     const body = JSON.stringify(data);
     if (fileId) {
       const up = await (await api(`${UPLOAD}/files/${fileId}?uploadType=media&fields=md5Checksum`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })).json();
@@ -684,6 +782,12 @@ async function flushSaves() {
     }
     // 저장하는 사이 같은 영상이 또 바뀌지 않았으면 대기열에서 뺌
     for (const [id, entry] of batch) if (pendingSaves.get(id) === entry) pendingSaves.delete(id);
+    for (const id of migrate) migrateQueue.delete(id);
+    for (const k of used) uploaded.delete(k);
+    // 바뀌거나 지운 썸네일의 옛 이미지 파일은 지움
+    for (const [id, file] of Object.entries(oldFiles)) {
+      if (file && (!data.videos[id] || data.videos[id].file !== file)) api(`${DRIVE}/files/${file}`, { method: 'DELETE' }).catch(() => {});
+    }
     saveError = '';
   } catch (e) {
     if (e instanceof AuthError) {
@@ -695,13 +799,14 @@ async function flushSaves() {
   } finally {
     saving = false;
   }
-  if (!saveError && pendingSaves.size) return flushSaves();
+  if (!saveError && (pendingSaves.size || migrateQueue.size)) return flushSaves();
   renderSaveState();
 }
 
 function renderSaveState() {
-  const n = pendingSaves.size, s = $('#saveState');
-  s.textContent = saveError ? `⚠️ ${saveError}${n ? ` (${n}개 남음)` : ''}` : n ? `💾 저장 중… ${n}개` : '';
+  const n = pendingSaves.size, m = migrateQueue.size, s = $('#saveState');
+  s.textContent = saveError ? `⚠️ ${saveError}${n + m ? ` (${n + m}개 남음)` : ''}`
+    : n ? `💾 저장 중… ${n}개` : m ? `🖼️ 썸네일 정리 중… ${m}개` : '';
   s.className = saveError ? 'error' : '';
 }
 
@@ -984,6 +1089,7 @@ let showHidden = false;
 
 // 카테고리 구역: 제목(카테고리 · 개수) + 영상 카드들. 숨긴 영상은 빼고(또는 흐리게) 보여줌
 function renderGrid() {
+  thumbObserver.disconnect(); // 지난번 카드는 버려지므로 지켜보던 것도 놓음
   const editing = document.body.classList.contains('editing');
   const hiddenCount = items.filter(isHidden).length;
   const visible = items.filter(f => !isHidden(f) || (showHidden && editing));
@@ -1105,10 +1211,11 @@ function videoCard(f) {
   const custom = gallery.videos[f.id];
   const thumb = el('div', { className: 'thumb' });
   const src = custom ? custom.thumb : (f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s480') : '');
-  if (src) {
-    const img = el('img', { src, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
+  if (src || (custom && custom.file)) {
+    const img = el('img', { alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
     img.onerror = () => img.replaceWith(el('span', { className: 'icon', textContent: '🎞️' }));
     img.onload = () => img.classList.add('ok');
+    if (src) img.src = src; else lazyThumb(img, custom.file); // 지정 썸네일 파일은 화면 근처에 오면 받음
     if (img.complete && img.naturalWidth) img.classList.add('ok'); // 이미 받아 둔 이미지
     thumb.append(img);
   } else {
@@ -1328,9 +1435,12 @@ function openViewer(f) {
   const playerWrap = el('div', { className: 'player-wrap' }, iframe); // 영역 조절기가 이 위에 겹쳐 뜸
   // 폰(<video>): 재생 전에는 내가 정한 썸네일(없으면 드라이브 썸네일)을 영상 위에 띄움 → 누르면 재생
   const poster = custom ? custom.thumb : (f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s1280') : '');
-  if (iframe.tagName === 'VIDEO' && poster) {
+  if (iframe.tagName === 'VIDEO' && (poster || (custom && custom.file))) {
+    const posterImg = el('img', { alt: '', referrerPolicy: 'no-referrer' });
+    if (poster) posterImg.src = poster;
+    else thumbUrl(custom.file).then(u => { posterImg.src = u; }, () => {});
     const cover = el('button', { className: 'poster', title: '재생' },
-      el('img', { src: poster, alt: '', referrerPolicy: 'no-referrer' }), el('span', { className: 'play', textContent: '▶' }));
+      posterImg, el('span', { className: 'play', textContent: '▶' }));
     cover.onclick = () => { // 주소가 아직 안 붙었으면(재생 준비 중) 붙는 즉시 재생
       cover.remove();
       const go = () => iframe.play().catch(() => {});
