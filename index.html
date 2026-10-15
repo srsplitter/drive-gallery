@@ -103,6 +103,9 @@
   .pill .cnt { color: var(--dim); font-size: 12px; }
   .pill.on .cnt, .pill.on .star:not(.fav) { color: inherit; }
   .pill.ghost { border-style: dashed; color: var(--dim); }
+  .pill .pen { font-size: 11px; margin-left: 2px; opacity: .8; }
+  .pill .pen:hover { opacity: 1; }
+  .m-in.pill-in { width: 140px; padding: 4px 10px; border-radius: 999px; font-size: 13px; }
   .memo { position: relative; }
   .memo textarea { width: 100%; min-height: 72px; resize: vertical; padding: 8px 10px 40px; border-radius: 10px;
     border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
@@ -482,10 +485,57 @@ function tagCounts() {
   return new Map([...n].sort((a, b) => b[1] - a[1]));
 }
 // 알약: ★/☆ 이름 (개수). onStar 가 있으면 별만 따로 눌림
-function pill(t, count, { onclick, onStar, on } = {}) {
+// onRename 이 있으면(수정 ON) 오른쪽에 ✏️ — 누르면 그 자리에서 이름 바꾸기
+function pill(t, count, { onclick, onStar, on, onRename } = {}) {
   const star = el('span', { className: 'star' + (isFav(t) ? ' fav' : ''), textContent: isFav(t) ? '★' : '☆' });
   if (onStar) star.onclick = e => { e.stopPropagation(); onStar(); };
-  return el('button', { className: 'pill' + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
+  const p = el('button', { className: 'pill' + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
+  if (onRename) p.append(el('span', { className: 'pen', textContent: '✏️', title: '태그 이름 바꾸기',
+    onclick: e => { e.stopPropagation(); editTagInline(p, t, onRename); } }));
+  return p;
+}
+
+// 알약 자리에 입력칸 → Enter·다른 곳 누르면 저장, Esc 취소. 끝나면 after() 로 다시 그림
+function editTagInline(p, t, after) {
+  const input = el('input', { className: 'm-in pill-in', value: t, spellcheck: false });
+  let done = false;
+  const finish = save => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (save && name && name !== t) renameTag(t, name);
+    after();
+  };
+  input.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+  };
+  input.onblur = () => finish(true);
+  p.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+// 태그 이름 바꾸기: 그 태그가 붙은 모든 영상에 적용(이미 새 이름이 붙어 있으면 하나로 합침). 즐겨찾기·검색 조건도 따라감
+function renameTag(from, to) {
+  for (const f of items) {
+    const tags = tagsOf(f);
+    if (!tags.includes(from)) continue;
+    const next = [...new Set(tags.map(x => (x === from ? to : x)))];
+    gallery.tags[f.id] = next;
+    pendingSaves.set('t:' + f.id, next);
+  }
+  if (isFav(from)) {
+    delete gallery.fav[from];
+    pendingSaves.set('f:' + from, null);
+    gallery.fav[to] = true;
+    pendingSaves.set('f:' + to, true);
+  }
+  const swap = list => [...new Set(list.map(x => (x === from ? to : x)))];
+  filters.tags = swap(filters.tags);
+  if (menuDraft) menuDraft.tags = swap(menuDraft.tags);
+  renderGrid();
+  flushSaves();
 }
 
 const isHidden = f => !!gallery.hidden[f.id];
@@ -653,7 +703,8 @@ function renderMenu() {
     }
     sugg.replaceChildren(...list.map(t => pill(t, counts.get(t), {
       onclick: () => { draft.tags.push(t); tagIn.value = ''; drawTags(); },
-      onStar: editing ? () => { toggleFav(t); drawTags(); } : null })));
+      onStar: editing ? () => { toggleFav(t); drawTags(); } : null,
+      onRename: editing ? () => renderMenu() : null })));
   };
   tagIn.oninput = drawTags;
   tagIn.onkeydown = e => {
@@ -699,9 +750,9 @@ function renderMenu() {
     onclick: () => { if (randomRank) { randomRank = null; renderGrid(); } else shuffleShown(); renderMenu(); } });
 
   $('#mBody').replaceChildren(
-    el('div', { className: 'm-sec' }, el('b', { textContent: '태그 검색 (고른 태그가 모두 있는 영상만)' }), chosen, tagIn, sugg,
-      editing ? el('p', { className: 'hint', style: 'margin:0', textContent: '수정 ON: 알약의 ☆ 를 누르면 즐겨찾기' }) : null),
     el('div', { className: 'm-sec' }, el('b', { textContent: '통합 검색' }), textIn),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '태그 검색 (고른 태그가 모두 있는 영상만)' }), chosen, tagIn, sugg,
+      editing ? el('p', { className: 'hint', style: 'margin:0', textContent: '수정 ON: 알약의 ☆ = 즐겨찾기, ✏️ = 태그 이름 바꾸기(그 태그가 붙은 모든 영상에 적용)' }) : null),
     el('div', { className: 'm-sec' }, el('b', { textContent: '길이' }),
       el('div', { className: 'm-time' }, minIn, maxIn, el('span', { className: 'hint', textContent: '분' }))),
     el('div', { className: 'm-sec' }, el('b', { textContent: '카테고리' }), catBox),
@@ -1307,7 +1358,8 @@ function tagBox(f) {
     const counts = tagCounts();
     const editing = document.body.classList.contains('editing');
     box.replaceChildren(el('div', { className: 'pills' },
-      ...tagsOf(f).map(t => pill(t, counts.get(t), { onclick: editing ? () => { toggleFav(t); pills(); } : null })),
+      ...tagsOf(f).map(t => pill(t, counts.get(t), { onclick: editing ? () => { toggleFav(t); pills(); } : null,
+        onRename: editing ? pills : null })),
       el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
       el('button', { className: 'pill ghost', textContent: '수정', onclick: () => memo().focus() })));
   };
