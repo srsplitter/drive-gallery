@@ -49,7 +49,10 @@ async function capture(tab) {
 
 async function player(tab, action, delta) {
   const frames = (await inFrames(tab, framePlayer, [action, delta])).map((r) => r.result).filter(Boolean);
-  if (action === 'kick') return { ok: frames.some((r) => r.kicked) };
+  if (action === 'kick') {
+    const kicked = frames.filter((r) => r.kicked);
+    return { ok: true, kicked: kicked.length > 0, clicked: kicked.map((r) => `${r.where} → ${r.clicked}`).join(' / ') || '누를 곳을 못 찾음' };
+  }
   const hit = frames.find((r) => r.acted);
   if (hit) return { ok: true, paused: hit.paused, time: hit.time, duration: hit.duration };
   const seen = frames.map((r) => `${r.where}(영상 ${r.videos})`).join(', ') || '하위 프레임 없음';
@@ -103,16 +106,24 @@ async function framePlayer(action, delta) {
   const where = (location.hostname || location.protocol) + location.pathname.slice(0, 30);
   const v = found.find((x) => x.offsetWidth > 0 && x.offsetHeight > 0) || found[0];
   if (action === 'kick') {
-    // 영상 불러오기: 영상이 있으면 재생(수정 모드면 autopause.js 가 곧 멈춤), 아직 없으면 화면 가운데(재생 버튼)를 클릭
-    if (v) { v.play().catch(() => {}); return { where, videos: found.length, kicked: true }; }
-    const x = innerWidth / 2, y = innerHeight / 2, target = document.elementFromPoint(x, y);
-    if (target && target.tagName !== 'IFRAME') { // 가운데가 하위 iframe 이면 그 안의 이 함수가 처리
-      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
-        const Ev = type.startsWith('pointer') ? PointerEvent : MouseEvent;
-        target.dispatchEvent(new Ev(type, { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 }));
-      }
-    }
-    return { where, videos: 0, kicked: true };
+    // 영상 불러오기: 영상이 있으면 재생(수정 모드면 autopause.js 가 곧 멈춤),
+    // 아직 없으면 "재생/Play" 라벨이 붙은 버튼, 없으면 화면 가운데를 클릭. 무엇을 눌렀는지 알려줌(진단용)
+    if (v) { v.play().catch(() => {}); return { where, videos: found.length, kicked: true, clicked: 'video.play()' }; }
+    const describe = (e) => !e ? '없음' : e.tagName.toLowerCase()
+      + (e.getAttribute('aria-label') ? `[${e.getAttribute('aria-label')}]` : '')
+      + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/)[0] : '');
+    const labelled = [...document.querySelectorAll('[aria-label],[title]')].find((e) =>
+      // "재생", "재생(k)", "Play (k)" 만 ("재생 속도" 같은 다른 버튼은 제외)
+      /^\s*(재생|play)\s*(\(.*\))?\s*$/i.test(e.getAttribute('aria-label') || e.getAttribute('title') || '') && e.offsetWidth > 0 && e.offsetHeight > 0);
+    const x = innerWidth / 2, y = innerHeight / 2;
+    const target = labelled || document.elementFromPoint(x, y);
+    if (!target || target.tagName === 'IFRAME') return { where, videos: 0 }; // 가운데가 하위 iframe 이면 그 안의 이 함수가 처리
+    const r = target.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    for (const type of ['pointerover', 'pointerenter', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+      const Ev = type.startsWith('pointer') ? PointerEvent : MouseEvent;
+      target.dispatchEvent(new Ev(type, { bubbles: true, cancelable: true, composed: true, clientX: cx, clientY: cy, button: 0, view: window }));
+    } // click 은 한 번만 (두 번이면 재생됐다 바로 멈출 수 있음)
+    return { where, videos: 0, kicked: true, clicked: describe(target) };
   }
   if (!v) return { where, videos: 0 };
   if (action === 'toggle') {

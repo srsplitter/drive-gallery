@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "드라이브 영상 갤러리 도우미",
-  "version": "1.7",
+  "version": "1.8",
   "description": "드라이브 영상 갤러리에서 공유 허용 없이 플레이어 화면을 바로 캡처하고(컨트롤 자동 숨김), 재생·프레임 이동 버튼과 수정 모드 자동 멈춤을 쓸 수 있게 합니다.",
   "background": { "service_worker": "relay.js" },
   "content_scripts": [

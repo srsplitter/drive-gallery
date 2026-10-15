@@ -519,13 +519,18 @@ function openViewer(f) {
   // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 시간 조절바가 바로 보임.
   // 플레이어가 준비되는 데 시간이 걸려 1.2초 뒤부터 확인하고, 아직이면 재생 버튼을 다시 누름(최대 4번)
   iframe.addEventListener('load', async () => {
-    for (let i = 0; i < 4; i++) {
+    let clicked = '';
+    for (let i = 0; i < 5; i++) {
       await new Promise(r => setTimeout(r, i ? 1500 : 1200));
       if (!viewer.open || viewerFile !== f || !extReady || !document.body.classList.contains('editing')) return;
       const st = await extCall('player', { action: 'state' }).catch(() => null);
-      if (st && st.duration) return showState(st); // 이미 불러와짐
-      await extCall('player', { action: 'kick' }).catch(() => {});
+      if (st && st.duration) return showState(st); // 불러와짐
+      if (i === 4) break;
+      const k = await extCall('player', { action: 'kick' }).catch(e => ({ clicked: e.message }));
+      clicked = k.clicked || clicked;
     }
+    // 진단: 무엇을 눌렀는지·확장 버전을 보여줌
+    showPreviewMessage(`자동 재생이 안 됐어요. 영상을 직접 한 번 눌러 주세요. (확장 v${extVersion || '?'} · 누른 곳: ${clicked || '없음'})`);
   }, { once: true });
   // 대표 장면: 수정 ON 이면 바로, 창을 연 채 수정을 켜면 그때 (미리 뽑아 둔 게 있으면 즉시 보임)
   viewerUI.startCands = () => { if (!cands.hasChildNodes()) showCandidates(f, iframe, cands, captureBtn); };
@@ -1307,11 +1312,12 @@ function capture(source, sw, sh) {
 }
 
 // ---------- 확장 프로그램 (있으면 공유 허용 없이 캡처 + 플레이어 조작) ----------
-let extReady = false;
+let extReady = false, extVersion = '';
 const extWaiters = new Map();
 window.addEventListener('message', e => {
   if (e.source !== window || !e.data || e.data.source !== 'dgallery-ext') return;
   if (e.data.type === 'ready') {
+    extVersion = e.data.version || extVersion;
     if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); syncAutoPause(); }
   } else if (e.data.type === 'result') {
     const done = extWaiters.get(e.data.id);

@@ -6,7 +6,7 @@ window.addEventListener('message', (ev) => {
   if (!d || d.source !== 'dgallery-page') return;
 
   if (d.type === 'ping') {
-    window.postMessage({ source: 'dgallery-ext', type: 'ready' }, location.origin);
+    window.postMessage({ source: 'dgallery-ext', type: 'ready', version: chrome.runtime.getManifest().version }, location.origin);
     return;
   }
 
@@ -30,4 +30,4 @@ window.addEventListener('message', (ev) => {
 });
 
 // 설치되어 있음을 페이지에 알림
-window.postMessage({ source: 'dgallery-ext', type: 'ready' }, location.origin);
+window.postMessage({ source: 'dgallery-ext', type: 'ready', version: chrome.runtime.getManifest().version }, location.origin);
