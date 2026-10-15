@@ -35,8 +35,10 @@
   #status { color: var(--dim); text-align: center; padding: 24px 0; }
   #status:empty { display: none; }
   #status.error { color: var(--danger); }
-  #grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
-  @media (max-width: 520px) { #grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
+  .cat { margin-bottom: 28px; }
+  .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
+  .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer;
     text-align: left; padding: 0; display: block; width: 100%; }
   .card:hover { border-color: var(--dim); }
@@ -370,18 +372,18 @@ function renderSaveState() {
 // 저장이 남아 있으면 탭을 닫기 전에 한 번 확인
 window.addEventListener('beforeunload', e => { if (pendingSaves.size) { e.preventDefault(); e.returnValue = ''; } });
 
-// ---------- 폴더 탐색 ----------
-let path = [{ id: 'root', name: '내 드라이브' }];
-let items = [];
-try { const saved = JSON.parse(localStorage.getItem('path') || 'null'); if (Array.isArray(saved) && saved.length) path = saved; } catch {}
+// ---------- 모든 영상 (드라이브 폴더 = 카테고리) ----------
+// 내가 올린 영상을 한 번에 모두 가져와, 들어 있는 드라이브 폴더 이름을 카테고리로 삼아 한 화면에 구역별로 보여줌.
+// 폴더 밖(내 드라이브 맨 위) 영상은 "내 드라이브" 구역. 같은 이름의 폴더는 한 카테고리로 합쳐짐.
+let items = []; // 화면 순서(카테고리 → 이름)대로 모든 영상
 
-async function listFolder(id) {
-  const q = `'${id}' in parents and trashed = false and (mimeType = 'application/vnd.google-apps.folder' or mimeType contains 'video/')`;
-  const fields = 'nextPageToken,files(id,name,mimeType,thumbnailLink,size,videoMediaMetadata(durationMillis))';
+async function listAllVideos() {
+  const q = "mimeType contains 'video/' and trashed = false and 'me' in owners";
+  const fields = 'nextPageToken,files(id,name,mimeType,thumbnailLink,size,parents,videoMediaMetadata(durationMillis))';
   const out = [];
   let pageToken = '';
   do {
-    const p = new URLSearchParams({ q, fields, pageSize: '1000', orderBy: 'folder,name' });
+    const p = new URLSearchParams({ q, fields, pageSize: '1000' });
     if (pageToken) p.set('pageToken', pageToken);
     const data = await (await api(`${DRIVE}/files?${p}`)).json();
     out.push(...data.files);
@@ -390,52 +392,66 @@ async function listFolder(id) {
   return out;
 }
 
+// 폴더 ID → 이름 (내 드라이브 맨 위는 "내 드라이브")
+async function folderNames(ids) {
+  const names = new Map();
+  const root = await (await api(`${DRIVE}/files/root?fields=id`)).json();
+  await Promise.all(ids.map(async id => {
+    if (id === root.id) return names.set(id, '내 드라이브');
+    try { names.set(id, (await (await api(`${DRIVE}/files/${id}?fields=name`)).json()).name); }
+    catch (e) { if (e instanceof AuthError) throw e; names.set(id, '기타'); }
+  }));
+  return names;
+}
+
 function setStatus(msg, isError) {
   const s = $('#status');
   s.textContent = msg;
   s.className = isError ? 'error' : '';
 }
 
-function renderCrumbs() {
-  $('#crumbs').replaceChildren(...path.flatMap((p, i) => [
-    i ? el('span', { textContent: '›' }) : null,
-    el('a', { textContent: p.name, onclick: () => { path = path.slice(0, i + 1); openFolder(); } }),
-  ]).filter(Boolean));
-}
-
+// (이름은 예전 그대로) 모든 영상을 불러와 카테고리별로 그림
 async function openFolder() {
-  localStorage.setItem('path', JSON.stringify(path));
-  renderCrumbs();
+  $('#crumbs').replaceChildren(el('a', { textContent: '모든 영상' }));
   $('#grid').replaceChildren();
   setStatus('불러오는 중…');
   try {
-    items = await listFolder(path[path.length - 1].id);
-    setStatus(items.length ? '' : '이 폴더에는 영상이나 하위 폴더가 없어요.');
+    const vids = await listAllVideos();
+    const names = await folderNames([...new Set(vids.map(v => (v.parents || [])[0]).filter(Boolean))]);
+    for (const v of vids) v.category = names.get((v.parents || [])[0]) || '기타';
+    const coll = new Intl.Collator('ko', { numeric: true });
+    const rank = c => (c === '내 드라이브' ? 0 : 1);
+    vids.sort((a, b) => rank(a.category) - rank(b.category) || coll.compare(a.category, b.category) || coll.compare(a.name, b.name));
+    items = vids;
+    $('#crumbs').replaceChildren(el('a', { textContent: `모든 영상 · ${items.length}개` }));
+    setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
     renderGrid();
     scrollToNextTodo();
   } catch (e) { handleError(e); }
 }
 
-// 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (폴더를 열 때·수정을 켤 때)
+// 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (목록을 열 때·수정을 켤 때·다시 로그인할 때)
 function scrollToNextTodo() {
   if (!document.body.classList.contains('editing')) return;
-  const i = items.findIndex(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]);
-  const card = i >= 0 && $('#grid').children[i];
+  const f = items.find(x => !gallery.videos[x.id]);
+  const card = f && $('#grid').querySelector(`.card[data-id="${CSS.escape(f.id)}"]`);
   if (!card) return;
   for (const c of $('#grid').querySelectorAll('.card.next-todo')) c.classList.remove('next-todo');
   card.classList.add('next-todo');
   card.scrollIntoView({ block: 'center' });
 }
 
+// 카테고리 구역: 제목(카테고리 · 개수) + 영상 카드들
 function renderGrid() {
-  $('#grid').replaceChildren(...items.map(f => f.mimeType === 'application/vnd.google-apps.folder' ? folderCard(f) : videoCard(f)));
+  const groups = new Map();
+  for (const f of items) {
+    if (!groups.has(f.category)) groups.set(f.category, []);
+    groups.get(f.category).push(f);
+  }
+  $('#grid').replaceChildren(...[...groups].map(([cat, list]) => el('section', { className: 'cat' },
+    el('h2', { className: 'cat-title', textContent: `${cat} · ${list.length}개` }),
+    el('div', { className: 'cat-grid' }, ...list.map(videoCard)))));
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
-}
-
-function folderCard(f) {
-  return el('button', { className: 'card', onclick: () => { path.push({ id: f.id, name: f.name }); openFolder(); } },
-    el('div', { className: 'thumb' }, el('span', { className: 'icon', textContent: '📁' })),
-    el('div', { className: 'name', textContent: f.name, title: f.name }));
 }
 
 function videoCard(f) {
@@ -452,8 +468,10 @@ function videoCard(f) {
   if (custom) thumb.append(el('span', { className: 'badge pin', textContent: '📌' + (typeof custom.t === 'number' ? ' ' + fmtTime(custom.t) : '') }));
   const dur = f.videoMediaMetadata && +f.videoMediaMetadata.durationMillis;
   if (dur) thumb.append(el('span', { className: 'badge', textContent: fmtTime(dur / 1000) }));
-  return el('button', { className: 'card', onclick: () => openViewer(f) },
+  const card = el('button', { className: 'card', onclick: () => openViewer(f) },
     thumb, el('div', { className: 'name', textContent: f.name, title: f.name }));
+  card.dataset.id = f.id;
+  return card;
 }
 
 function handleError(e) {
@@ -1504,7 +1522,6 @@ $('#clientIdSave').onclick = () => {
 };
 
 (async () => {
-  renderCrumbs();
   if (!clientId()) { $('#setup').hidden = false; return; }
   try { await loadGis(); } catch { return setStatus('구글 로그인 스크립트를 불러오지 못했어요.', true); }
   tokenClient = google.accounts.oauth2.initTokenClient({ client_id: clientId(), scope: SCOPES, callback: () => {} });
