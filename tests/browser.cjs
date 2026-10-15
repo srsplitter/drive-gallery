@@ -23,7 +23,7 @@ const root = path.resolve(__dirname, '..');
       window.savedChanges = [];
       flushSaves = async () => { window.savedChanges.push(...pendingSaves); pendingSaves.clear(); };
       gallery = { videos: {}, hidden: {}, tags: { a:['게임','마리오','버섯'], b:['게임','루이지'], c:['영화'], d:[], e:['일반'] },
-        fav: {}, hiddenCats: {}, exUse: {}, loved: { e:true }, tagKinds:{ '게임':'category', '영화':'category', '마리오':'character', '루이지':'character' }, marks:{} };
+        fav: {}, hiddenCats: {}, exUse: {}, loved: { e:true }, tagKinds:{ '게임':'category', '영화':'category', '마리오':'character', '루이지':'character' }, marks:{}, series:{} };
       items = ['a','b','c','d','e'].map(id => ({id, name: id + '.mp4', mimeType:'video/mp4', category:'old-folder', videoMediaMetadata:{durationMillis:'10000'}}));
       $('#setup').hidden = true; $('#editBtn').hidden = false; $('#authBtn').hidden = false;
       renderGrid();
