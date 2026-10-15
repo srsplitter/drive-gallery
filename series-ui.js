@@ -60,6 +60,7 @@ const SeriesUI = (() => {
   }
   function toolbar() {
     const wrap = el('div', { className: 'series-actions edit-only' });
+    wrap.append(el('button', { className: 'chip', textContent: '↻', title: '검색 조건 초기화', ariaLabel: '검색 조건 초기화', onclick: () => $('#menuReset').click() }));
     if (!selection) { wrap.append(el('button', { className: 'chip', textContent: '시리즈 지정', onclick: start })); return wrap; }
     wrap.append(el('span', { className: 'hint', textContent: (selection.id ? saved()[selection.id].name : '새 시리즈') + ' · ' + selection.ids.length + '개' }),
       el('button', { className: 'primary', textContent: '저장', onclick: saveSelection }),
