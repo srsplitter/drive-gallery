@@ -55,6 +55,9 @@
   .player-wrap { position: relative; }
   .row.end { justify-content: flex-end; }
   .card.next-todo { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  .card.is-hidden { opacity: .45; }
+  .badge.hid { top: 6px; bottom: auto; right: 6px; }
+  button.small { padding: 3px 10px; font-size: 13px; margin-left: 8px; }
   button.danger { background: #c62828; border-color: #c62828; color: #fff; }
   body.editing #vTitle { cursor: text; }
   body.editing #vTitle:hover { text-decoration: underline dotted; }
@@ -260,7 +263,8 @@ function setEditMode(on) {
   renderEditBtn();
   syncAutoPause();
   if (on && viewer.open && viewerUI && viewerUI.startCands) viewerUI.startCands(); // 창을 연 채 수정을 켜면 대표 장면 시작
-  if (on) { prefetchCandidates(); scrollToNextTodo(); }
+  if (items.length) renderGrid(); // 숨긴 영상 보기는 수정 ON 에서만
+  if (on) scrollToNextTodo();
 }
 
 // 확장에 수정 ON/OFF 를 알림 → ON 이면 영상을 클릭해 재생하는 순간 바로 멈춤 (⏯ 로 재생한 건 제외)
@@ -295,22 +299,37 @@ async function api(url, opts = {}) {
 }
 
 // ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
-let gallery = { videos: {} }, galleryFileId = null;
-// 아직 드라이브에 못 쓴 변경 (영상 ID → 새 항목, null = 삭제). 화면에는 이미 반영돼 있다.
+// gallery.json: { videos: { 영상ID: 지정 썸네일 }, hidden: { 영상ID: true(갤러리에서만 숨김) } }
+let gallery = { videos: {}, hidden: {} }, galleryFileId = null;
+// 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
 let saving = false, saveError = '', retryTimer = null;
 
 async function readRemote() {
   const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
   const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
-  if (!files.length) return { fileId: null, data: { videos: {} } };
+  if (!files.length) return { fileId: null, data: { videos: {}, hidden: {} } };
   const data = await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json();
   data.videos = data.videos || {};
+  data.hidden = data.hidden || {};
   return { fileId: files[0].id, data };
 }
 
 function applyChanges(data, changes) {
-  for (const [id, entry] of changes) { if (entry) data.videos[id] = entry; else delete data.videos[id]; }
+  for (const [key, val] of changes) {
+    const [map, id] = key.startsWith('h:') ? [data.hidden, key.slice(2)] : [data.videos, key];
+    if (val) map[id] = val; else delete map[id];
+  }
+}
+
+const isHidden = f => !!gallery.hidden[f.id];
+
+// 갤러리에서만 숨기기/해제 (드라이브 파일은 그대로). 화면엔 바로, 저장은 뒤에서
+function setHidden(f, on) {
+  if (on) gallery.hidden[f.id] = true; else delete gallery.hidden[f.id];
+  pendingSaves.set('h:' + f.id, on || null);
+  renderGrid();
+  flushSaves();
 }
 
 async function loadGallery() {
@@ -423,7 +442,6 @@ async function openFolder() {
     const rank = c => (c === '내 드라이브' ? 0 : 1);
     vids.sort((a, b) => rank(a.category) - rank(b.category) || coll.compare(a.category, b.category) || coll.compare(a.name, b.name));
     items = vids;
-    $('#crumbs').replaceChildren(el('a', { textContent: `모든 영상 · ${items.length}개` }));
     setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
     renderGrid();
     scrollToNextTodo();
@@ -433,7 +451,7 @@ async function openFolder() {
 // 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (목록을 열 때·수정을 켤 때·다시 로그인할 때)
 function scrollToNextTodo() {
   if (!document.body.classList.contains('editing')) return;
-  const f = items.find(x => !gallery.videos[x.id]);
+  const f = items.find(x => !gallery.videos[x.id] && !isHidden(x));
   const card = f && $('#grid').querySelector(`.card[data-id="${CSS.escape(f.id)}"]`);
   if (!card) return;
   for (const c of $('#grid').querySelectorAll('.card.next-todo')) c.classList.remove('next-todo');
@@ -441,15 +459,25 @@ function scrollToNextTodo() {
   card.scrollIntoView({ block: 'center' });
 }
 
-// 카테고리 구역: 제목(카테고리 · 개수) + 영상 카드들
+// 숨긴 영상도 같이 보기 (수정 ON 에서만, 흐리게) — 다시 열어 "숨김 해제"할 수 있게
+let showHidden = false;
+
+// 카테고리 구역: 제목(카테고리 · 개수) + 영상 카드들. 숨긴 영상은 빼고(또는 흐리게) 보여줌
 function renderGrid() {
+  const editing = document.body.classList.contains('editing');
+  const hiddenCount = items.filter(isHidden).length;
+  const visible = items.filter(f => !isHidden(f) || (showHidden && editing));
+  $('#crumbs').replaceChildren(el('a', { textContent: `모든 영상 · ${items.length - hiddenCount}개` }));
+  if (hiddenCount) $('#crumbs').append(el('button', { className: 'edit-only small',
+    textContent: showHidden ? `🙈 숨긴 영상 ${hiddenCount}개 감추기` : `🙈 숨긴 영상 ${hiddenCount}개 보기`,
+    onclick: () => { showHidden = !showHidden; renderGrid(); } }));
   const groups = new Map();
-  for (const f of items) {
+  for (const f of visible) {
     if (!groups.has(f.category)) groups.set(f.category, []);
     groups.get(f.category).push(f);
   }
   $('#grid').replaceChildren(...[...groups].map(([cat, list]) => el('section', { className: 'cat' },
-    el('h2', { className: 'cat-title', textContent: `${cat} · ${list.length}개` }),
+    el('h2', { className: 'cat-title', textContent: `${cat} · ${list.filter(f => !isHidden(f)).length}개` }),
     el('div', { className: 'cat-grid' }, ...list.map(videoCard)))));
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -471,6 +499,7 @@ function videoCard(f) {
   const card = el('button', { className: 'card', onclick: () => openViewer(f) },
     thumb, el('div', { className: 'name', textContent: f.name, title: f.name }));
   card.dataset.id = f.id;
+  if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
   return card;
 }
 
@@ -569,7 +598,11 @@ function openViewer(f) {
     el('p', { className: 'hint edit-only no-ext-only', textContent: canCapture
       ? '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "📸 지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.'
       : '드라이브 앱에서 원하는 장면을 스크린샷으로 찍은 뒤 "🖼️ 이미지로 지정"으로 골라 주세요.' }),
-    el('div', { className: 'row end edit-only' }, trashButton(f)));
+    el('div', { className: 'row end edit-only' },
+      // 갤러리에서만 숨기기/해제 (드라이브엔 그대로) — 바로 닫히고 저장은 뒤에서
+      el('button', { textContent: isHidden(f) ? '👁️ 숨김 해제' : '🙈 숨기기', title: '갤러리에서만 숨김 (드라이브 파일은 그대로)',
+        onclick: () => { setHidden(f, !isHidden(f)); viewer.close(); } }),
+      trashButton(f)));
   viewer.showModal();
   // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 드라이브 시간 조절바가 바로 보임.
   // 불러오는 동안은 대표 장면 뽑기를 잠시 멈춰 플레이어가 인터넷을 먼저 쓰게 함.
@@ -883,7 +916,7 @@ async function extractViaHiddenPlayer(j) {
 const PREFETCH_COUNT = 10;
 function prefetchCandidates() {
   if (!document.body.classList.contains('editing') || !token) return;
-  const todo = items.filter(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]).slice(0, PREFETCH_COUNT);
+  const todo = items.filter(x => !gallery.videos[x.id] && !isHidden(x)).slice(0, PREFETCH_COUNT);
   const keep = new Set(todo.map(x => x.id));
   if (viewer.open && viewerFile) keep.add(viewerFile.id);
   for (const [id, j] of candJobs) {
