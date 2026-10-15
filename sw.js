@@ -3,8 +3,6 @@
 // 한 번에 최대 CHUNK 만큼만 받아오므로, 큰 영상도 보는/찾는 구간 근처만 내려받는다.
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const CHUNK = 4 * 1024 * 1024;
-// 그냥 볼 때(play=1)는 한 번에 크게 받아 요청 횟수를 줄임 — 요청마다 드라이브 응답 대기(약 0.5~1초)가 붙어 4MB씩이면 고화질 영상이 자꾸 멈춤
-const PLAY_CHUNK = 32 * 1024 * 1024;
 let auth = null; // { token, exp }
 
 self.addEventListener('install', () => self.skipWaiting());
@@ -28,18 +26,17 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   const m = url.pathname.match(/\/stream\/([\w-]+)$/);
   if (url.origin !== location.origin || !m) return;
-  e.respondWith(stream(m[1], +url.searchParams.get('size'), url.searchParams.get('type') || 'video/mp4', e.request,
-    url.searchParams.get('play') ? PLAY_CHUNK : CHUNK));
+  e.respondWith(stream(m[1], +url.searchParams.get('size'), url.searchParams.get('type') || 'video/mp4', e.request));
 });
 
-async function stream(id, size, type, req, chunk) {
+async function stream(id, size, type, req) {
   const token = await getToken();
   if (!token) return new Response('login required', { status: 401 });
   if (!(size > 0)) return new Response('size required', { status: 400 });
   const r = /bytes=(\d+)-(\d*)/.exec(req.headers.get('Range') || '');
   const start = r ? +r[1] : 0;
   if (start >= size) return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
-  const end = Math.min(r && r[2] ? +r[2] : size - 1, start + chunk - 1, size - 1);
+  const end = Math.min(r && r[2] ? +r[2] : size - 1, start + CHUNK - 1, size - 1);
   const up = await fetch(`${DRIVE}/files/${id}?alt=media`, {
     headers: { Authorization: 'Bearer ' + token, Range: `bytes=${start}-${end}` },
     signal: req.signal,

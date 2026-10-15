@@ -114,8 +114,12 @@
   /* 폰: 영상 창 대신 화면 전체를 쓰는 페이지 (왼쪽 위 ← 돌아가기, 영상은 남는 높이를 다 씀) */
   dialog.page { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; }
   dialog.page #vClose { order: -1; }
-  dialog.page .v-body { padding: 8px; }
-  dialog.page .frame { aspect-ratio: auto; height: calc(100dvh - 130px); min-height: 180px; max-height: none; object-fit: contain; }
+  /* 드라이브 플레이어는 폭이 좁으면 컨트롤(전체화면 등)이 오른쪽으로 잘림 → 폭을 600px 이상으로 두고
+     제목줄은 고정, 아래 내용만 가로·세로로 밀어서 볼 수 있게 (플레이어 아래 버튼 줄을 밀면 가로로 움직임) */
+  dialog.page[open] { display: flex; flex-direction: column; overflow: hidden; }
+  dialog.page .v-head { flex: none; }
+  dialog.page .v-body { padding: 8px; flex: 1; min-height: 0; overflow: auto; align-content: start; }
+  dialog.page .frame { aspect-ratio: auto; width: max(100%, 600px); height: calc(100dvh - 130px); min-height: 240px; max-height: none; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
   .time { font-variant-numeric: tabular-nums; min-width: 72px; text-align: center; }
@@ -594,7 +598,10 @@ function videoCard(f) {
   if (custom) thumb.append(el('span', { className: 'badge pin', textContent: '📌' + (typeof custom.t === 'number' ? ' ' + fmtTime(custom.t) : '') }));
   const dur = f.videoMediaMetadata && +f.videoMediaMetadata.durationMillis;
   if (dur) thumb.append(el('span', { className: 'badge', textContent: fmtTime(dur / 1000) }));
-  const card = el('button', { className: 'card', onclick: () => openViewer(f) },
+  // 폰 + 수정 OFF: 바로 드라이브(앱)로 열기 — 끼워 넣은 드라이브 플레이어는 폰에서 느리고 컨트롤이 겹침. 수정 ON 이면 영상 창
+  const open = () => isPhone && !document.body.classList.contains('editing')
+    ? (location.href = `https://drive.google.com/file/d/${f.id}/view`) : openViewer(f);
+  const card = el('button', { className: 'card', onclick: open },
     thumb, el('div', { className: 'name', textContent: f.name, title: f.name }));
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
@@ -643,36 +650,12 @@ async function streamReady() {
     return true;
   } catch { return false; }
 }
-// 플레이어를 전체화면으로. 아이폰은 <video> 만 전체화면이 되므로(webkitEnterFullscreen), 드라이브 플레이어면 드라이브에서 열기
-function fullscreen(player, f) {
-  const go = player.requestFullscreen || player.webkitRequestFullscreen || player.webkitEnterFullscreen;
-  if (go) return Promise.resolve(go.call(player)).catch(() => {});
-  window.open(`https://drive.google.com/file/d/${f.id}/view`, '_blank', 'noopener');
-}
-
-// 드라이브 파일을 sw.js 로 필요한 부분만 받아 <video> 로 재생. 드라이브 플레이어로는 절대 바꾸지 않음
-// (아이폰은 재생 중에도 일시적인 오류 이벤트가 오고, 드라이브 플레이어는 컨트롤이 겹쳐 터치를 뺏음).
-// 아예 못 불러왔을 때만 영상 아래에 이유를 한 줄 보여줌.
-function directPlayer(f) {
-  const v = el('video', { className: 'frame', controls: true, playsInline: true, preload: 'metadata' });
-  const src = 'stream/' + f.id + '?' + new URLSearchParams({ size: f.size, type: f.mimeType || 'video/mp4', play: 1 });
-  const note = text => { if (viewerFile === f && v.isConnected && !v.nextElementSibling) v.after(el('p', { className: 'hint', textContent: text })); };
-  v.onerror = async () => {
-    if (v.readyState > 0) return; // 이미 불러와 재생 중이면 무시
-    const e = v.error || {};
-    let probe = '';
-    try { // 같은 경로로 2바이트만 받아 보며 어디서 막혔는지 확인
-      const r = await fetch(src, { headers: { Range: 'bytes=0-1' } });
-      probe = ` · 응답 ${r.status}`;
-    } catch (x) { probe = ' · 응답 실패 ' + x.message; }
-    note(`재생을 못 했어요 (오류 ${e.code || '?'} ${e.message || ''}${probe}). 안 되면 "드라이브에서 열기"`);
-  };
-  streamReady().then(ok => {
-    if (!ok) return note('재생 준비가 안 됐어요. 새로고침해 주세요.');
-    if (!(+f.size > 0)) return note('파일 크기 정보가 없어 재생할 수 없어요. "드라이브에서 열기"를 써 주세요.');
-    if (viewerFile === f && v.isConnected) v.src = src;
-  });
-  return v;
+// 플레이어(드라이브 iframe)를 전체화면으로. 아이폰은 이게 안 되므로 버튼 자체를 숨김(플레이어 안의 전체화면 버튼 사용)
+const isPhone = !(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia); // 폰 브라우저엔 화면 캡처가 없음
+const canFullscreen =!!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+function fullscreen(player) {
+  const go = player.requestFullscreen || player.webkitRequestFullscreen;
+  if (go) Promise.resolve(go.call(player)).catch(() => {});
 }
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
@@ -696,8 +679,7 @@ function openViewer(f) {
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0], imageBtn); };
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-  // 폰(화면 캡처 없음): 드라이브 플레이어는 로그인 쿠키를 못 받아 G 로고에서 멈추므로, 파일을 직접 받아 기본 플레이어로 재생.
-  const iframe = canCapture ? drivePlayer() : directPlayer(f);
+  const iframe = drivePlayer();
   // edit-only: 수정 모드(ON)에서만 보임
   const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
@@ -726,7 +708,7 @@ function openViewer(f) {
       canCapture ? captureBtn : null,
       imageBtn,
       el('button', { className: 'edit-only', textContent: '🎯 시간으로 지정', onclick: () => openEditor(f) }),
-      el('button', { textContent: '⛶ 전체화면', onclick: () => fullscreen(playerWrap.querySelector('.frame'), f) }),
+      canFullscreen ? el('button', { textContent: '⛶ 전체화면', onclick: () => fullscreen(iframe) }) : null,
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     cands,
