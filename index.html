@@ -203,7 +203,7 @@
   .mark-btn { padding: 4px 8px; font-size: 22px; line-height: 1; }
   #vStar.on { color: #57b878; border-color: #57b878; }
   #vSquare.on { color: #a77950; border-color: #a77950; }
-  #directoryMemos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 24px 0 88px; }
+  #directoryMemos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0 88px; }
   body:not(.editing) .tag-directory .star { display: none; }
   @media (max-width: 520px) { #directoryMemos { grid-template-columns: 1fr; } }
   #directoryMemos[hidden], #bulkTag[hidden] { display: none; }
@@ -708,7 +708,9 @@ function tagCounts() {
     b[1] - a[1] || window.GalleryOrder.compareText(a[0], b[0])));
 }
 function sortedTags(f, counts = tagCounts()) {
-  return [...tagsOf(f)].sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || window.GalleryOrder.compareText(a, b));
+  const kindOrder = { character: 0, category: 1, genre: 2, normal: 3 };
+  return [...tagsOf(f)].sort((a, b) => (kindOrder[tagKind(a)] ?? 3) - (kindOrder[tagKind(b)] ?? 3)
+    || (counts.get(b) || 0) - (counts.get(a) || 0) || window.GalleryOrder.compareText(a, b));
 }
 const tagKind = t => gallery.tagKinds[t] || 'normal';
 function setTagKind(t, kind) {
@@ -1198,7 +1200,7 @@ function renderGrid() {
 
 // ---------- 검색 + 태그 유형 탐색 ----------
 let query = '', searchOpen = false, currentView = '', searchTimer = null;
-const directoryKinds = [['normal', '태그'], ['character', '캐릭터'], ['category', '카테고리']];
+const directoryKinds = [['normal', '태그'], ['character', '캐릭터'], ['category', '카테고리'], ['genre', '장르']];
 const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
 function directoryTabs() {
@@ -1262,6 +1264,14 @@ function renderDirectory() {
       flushSaves();
     };
     memoKeys(ta, () => done.click());
+    ta.addEventListener('keydown', e => {
+      if (e.key !== 'Tab' || e.isComposing || e.keyCode === 229) return;
+      const fields = [...memos.querySelectorAll('textarea')];
+      const next = fields[(fields.indexOf(ta) + (e.shiftKey ? -1 : 1) + fields.length) % fields.length];
+      if (!next) return;
+      e.preventDefault();
+      next.focus({ preventScroll: true });
+    });
     return el('div', { className: 'm-sec' }, el('b', { textContent: label + '(으)로 이동' }), el('div', { className: 'memo' }, ta, done));
   }));
 }

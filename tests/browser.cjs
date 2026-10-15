@@ -40,7 +40,7 @@ const root = path.resolve(__dirname, '..');
     await page.evaluate(() => setEditMode(true));
     assert.equal(await page.locator('#grid .pen').count(), 2);
     assert.equal(await page.locator('#grid .bin').count(), 2);
-    assert.equal(await page.locator('#directoryMemos textarea').count(), 2);
+    assert.equal(await page.locator('#directoryMemos textarea').count(), 3);
     const memo = page.locator('#directoryMemos .m-sec').filter({has:page.getByText('캐릭터(으)로 이동',{exact:true})});
     await memo.locator('textarea').fill('버섯');
     await memo.locator('textarea').press('Enter');
@@ -85,13 +85,14 @@ const root = path.resolve(__dirname, '..');
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     const roundtrip = await page.evaluate(()=>{
       const data={videos:{keep:{file:'existing-thumb'}},tags:{a:['게임']},tagKinds:{},marks:{}};
-      applyChanges(data,new Map([['k:게임','category'],['m:a','star']]));
+      applyChanges(data,new Map([['k:게임','category'],['k:모험','genre'],['m:a','star']]));
       return JSON.parse(JSON.stringify(data));
     });
     assert.equal(roundtrip.videos.keep.file,'existing-thumb');
     assert.equal(roundtrip.tagKinds['게임'],'category');
+    assert.equal(roundtrip.tagKinds['모험'],'genre');
     assert.equal(roundtrip.marks.a,'star');
-    for (const source of ['normal','character','category']) {
+    for (const source of ['normal','character','category','genre']) {
       await page.evaluate(source=>{
         gallery.tags={a:['첫째','둘째','셋째']}; gallery.tagKinds={};
         if(source!=='normal') for(const t of gallery.tags.a) gallery.tagKinds[t]=source;
@@ -99,6 +100,13 @@ const root = path.resolve(__dirname, '..');
       },source);
       const first=page.locator('#directoryMemos textarea').nth(0);
       const other=page.locator('#directoryMemos textarea').nth(1);
+      const last=page.locator('#directoryMemos textarea').nth(2);
+      assert.equal(await page.locator('#directoryMemos textarea').count(),3);
+      await first.focus(); await first.press('Tab');
+      assert.equal(await other.evaluate(n=>n===document.activeElement),true,source+' tab next');
+      await other.press('Tab');assert.equal(await last.evaluate(n=>n===document.activeElement),true);
+      await last.press('Tab');assert.equal(await first.evaluate(n=>n===document.activeElement),true,source+' tab wrap');
+      await first.press('Shift+Tab');assert.equal(await last.evaluate(n=>n===document.activeElement),true,source+' shift tab wrap');
       await other.fill('미전송');
       await first.fill('첫째'); await first.press('Enter');
       assert.equal(await first.evaluate(n=>n===document.activeElement),true,source+' focus after Enter');
@@ -124,6 +132,21 @@ const root = path.resolve(__dirname, '..');
     assert.equal(colors.pills[0].bg,colors.pills[2].bg);assert.equal(colors.pills[1].color,colors.pills[2].color);
     assert.ok(colors.chips.some(s=>s.border==='rgb(255, 79, 154)'));
     assert.ok(colors.chips.some(s=>s.border==='rgb(87, 184, 120)'));
+    const chipOrder=await page.evaluate(()=>{
+      gallery.tags={a:['일반','모험','게임','마리오','루이지'],b:['일반','게임','루이지'],c:['일반']};
+      gallery.tagKinds={모험:'genre',게임:'category',마리오:'character',루이지:'character'};
+      currentView='';filters=EMPTY_FILTERS();query='';renderGrid();
+      return [...document.querySelector('.card[data-id="a"] .card-tags').children].map(n=>n.textContent);
+    });
+    assert.deepEqual(chipOrder,['루이지','마리오','게임','모험','일반']);
+    await page.locator('#catbar').getByRole('button',{name:'장르',exact:true}).click();
+    assert.equal(await page.locator('#grid .pill').count(),1);
+    await page.locator('#grid .pill').filter({hasText:'모험'}).click();
+    assert.deepEqual(await page.locator('#grid .card').evaluateAll(ns=>ns.map(n=>n.dataset.id)),['a']);
+    await page.locator('#catbar').getByRole('button',{name:'태그',exact:true}).click();
+    const genreMemo=page.locator('#directoryMemos .m-sec').filter({has:page.getByText('장르(으)로 이동',{exact:true})});
+    await genreMemo.locator('textarea').fill('일반');await genreMemo.locator('textarea').press('Enter');
+    assert.equal(await page.evaluate(()=>gallery.tagKinds['일반']),'genre');
     await page.setViewportSize({width:1280,height:900});
     await page.evaluate(()=>{
       const thumb=(w,h,color)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,w,h);return {thumb:c.toDataURL(),at:'test'};};
