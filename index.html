@@ -129,6 +129,8 @@
   .memo textarea:focus { outline: none; border-color: var(--accent); }
   .memo .done { position: absolute; right: 8px; bottom: 10px; padding: 4px 12px; font-size: 13px; }
   .tag-add { display: grid; gap: 6px; }
+  #bulkTag { margin: 4px 0 88px; } /* 목록 맨 아래 태그 메모 (아래 ☰ 버튼에 안 가리게 여백) */
+  #bulkTag textarea { min-height: 64px; }
   .tag-box { display: grid; gap: 10px; }
   .all-tags > b { font-size: 12px; color: var(--dim); font-weight: 600; }
   body.editing .pill .star { cursor: pointer; padding: 2px 3px; margin: -2px -1px -2px -3px; border-radius: 6px; } /* 별만 따로 누르기 쉽게 */
@@ -177,7 +179,8 @@
   #editNote { position: absolute; right: 0; top: calc(100% + 8px); width: min(300px, 80vw); display: grid; gap: 8px;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
   #editNote[hidden] { display: none; }
-  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; opacity: 0; transition: opacity .25s; }
+  .thumb img.ok { opacity: 1; } /* 받아지는 대로 하나씩 떠오름 */
   .player-wrap { position: relative; }
   .poster { position: absolute; inset: 0; padding: 0; border: 0; border-radius: 8px; background: #000; overflow: hidden; display: grid; place-items: center; }
   .poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
@@ -263,6 +266,7 @@
   </section>
   <div id="status"></div>
   <div id="grid"></div>
+  <div id="bulkTag" class="edit-only"></div>
 </main>
 
 <dialog id="viewer">
@@ -398,6 +402,7 @@ function showLoggedOut(msg) {
   $('#authBtn').className = '';
   $('#authBtn').textContent = '로그아웃';
   sessionStorage.removeItem('tok');
+  caches.delete(GCACHE).catch(() => {}); // 이 브라우저에 둔 gallery.json 사본도 지움
   if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({});
   $('#grid').replaceChildren();
   $('#login').hidden = false;
@@ -481,10 +486,30 @@ let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse
 const pendingSaves = new Map();
 let saving = false, saveError = '', retryTimer = null;
 
+// gallery.json 은 지정 썸네일(이미지)을 품고 있어 커질 수 있으므로, 이 브라우저에 사본을 두고
+// 드라이브의 파일 지문(md5)이 같으면 다시 받지 않는다 (로그아웃하면 지움)
+const GCACHE = 'gallery-json';
+async function cacheGet() {
+  try { const r = await (await caches.open(GCACHE)).match('gallery.json'); return r ? await r.json() : null; } catch { return null; }
+}
+function cachePut(md5, data) {
+  if (!md5) return;
+  const body = JSON.stringify({ md5, data });
+  caches.open(GCACHE).then(c => c.put('gallery.json', new Response(body))).catch(() => {});
+}
+
 async function readRemote() {
-  const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
+  const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id,md5Checksum)' });
   const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
-  const data = files.length ? await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json() : {};
+  let data = {};
+  if (files.length) {
+    const cached = await cacheGet();
+    if (cached && cached.md5 === files[0].md5Checksum) data = cached.data;
+    else {
+      data = await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json();
+      cachePut(files[0].md5Checksum, data);
+    }
+  }
   for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
@@ -646,13 +671,16 @@ async function flushSaves() {
     applyChanges(data, batch);
     const body = JSON.stringify(data);
     if (fileId) {
-      await api(`${UPLOAD}/files/${fileId}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+      const up = await (await api(`${UPLOAD}/files/${fileId}?uploadType=media&fields=md5Checksum`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })).json();
+      cachePut(up.md5Checksum, data); // 방금 올린 내용 = 다음에 읽을 내용
       galleryFileId = fileId;
     } else {
       const form = new FormData();
       form.append('metadata', new Blob([JSON.stringify({ name: GALLERY_NAME, parents: ['appDataFolder'] })], { type: 'application/json' }));
       form.append('file', new Blob([body], { type: 'application/json' }));
-      galleryFileId = (await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', body: form })).json()).id;
+      const up = await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id,md5Checksum`, { method: 'POST', body: form })).json();
+      galleryFileId = up.id;
+      cachePut(up.md5Checksum, data);
     }
     // 저장하는 사이 같은 영상이 또 바뀌지 않았으면 대기열에서 뺌
     for (const [id, entry] of batch) if (pendingSaves.get(id) === entry) pendingSaves.delete(id);
@@ -916,13 +944,19 @@ function setStatus(msg, isError) {
 }
 
 // (이름은 예전 그대로) 모든 영상을 불러와 카테고리별로 그림
-async function openFolder() {
+// galleryLoading: 같이 받고 있는 gallery.json (숨김·썸네일·태그). 숨긴 영상이 잠깐이라도 보이지 않게 이걸 기다린 뒤 그림
+async function openFolder(galleryLoading) {
   $('#crumbs').replaceChildren(el('a', { textContent: '모든 영상' }));
   $('#grid').replaceChildren();
-  setStatus('불러오는 중…');
+  setStatus('영상 목록 받는 중…');
   try {
     const vids = await listAllVideos();
+    setStatus(`영상 ${vids.length}개 찾음 · 폴더 이름 확인 중…`);
     const names = await folderNames([...new Set(vids.map(v => (v.parents || [])[0]).filter(Boolean))]);
+    if (galleryLoading) {
+      setStatus(`영상 ${vids.length}개 찾음 · 썸네일·태그 정보 받는 중…`);
+      await galleryLoading;
+    }
     for (const v of vids) v.category = names.get((v.parents || [])[0]) || '기타';
     const coll = new Intl.Collator('ko', { numeric: true });
     const rank = c => (c === '내 드라이브' ? 0 : 1);
@@ -972,6 +1006,7 @@ function renderGrid() {
   // 🔀 랜덤: 구역 안에서 섞인 순서대로 (새로 보이게 된 영상은 뒤로)
   if (randomRank) for (const list of groups.values()) list.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
   shown = [...groups.values()].flat();
+  renderBulk();
   const sections = [...groups].map(([cat, list]) => ({ cat, count: list.filter(f => !isHidden(f)).length,
     el: el('section', { className: 'cat' },
       el('h2', { className: 'cat-title', textContent: `${cat} · ${list.filter(f => !isHidden(f)).length}개` }),
@@ -1073,6 +1108,8 @@ function videoCard(f) {
   if (src) {
     const img = el('img', { src, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
     img.onerror = () => img.replaceWith(el('span', { className: 'icon', textContent: '🎞️' }));
+    img.onload = () => img.classList.add('ok');
+    if (img.complete && img.naturalWidth) img.classList.add('ok'); // 이미 받아 둔 이미지
     thumb.append(img);
   } else {
     thumb.append(el('span', { className: 'icon', textContent: '🎞️' }));
@@ -1497,6 +1534,50 @@ async function renameVideo(f, name) {
   }
 }
 
+// 태그 메모 칸 공통: Enter = submit (한글 조합 중에 누른 Enter 는 글자가 확정된 뒤),
+// 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
+function memoKeys(ta, submit) {
+  let enterPending = false;
+  ta.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    if (e.isComposing || e.keyCode === 229) enterPending = true; else submit();
+  });
+  ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(submit); } });
+  ta.addEventListener('input', e => {
+    if (e.isComposing) return;
+    const v = ta.value, at = ta.selectionStart;
+    const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
+    const next = fix(v);
+    if (next === v) return;
+    const caret = fix(v.slice(0, at)).length;
+    ta.value = next;
+    ta.setSelectionRange(caret, caret);
+  });
+}
+
+// ---------- 목록 맨 아래 태그 메모 (수정 ON): 지금 화면에 보이는 영상 전부에 태그 붙이기 ----------
+const bulkTa = el('textarea', { placeholder: '태그를 쉼표로 구분해 적고 Enter → 지금 보이는 영상 모두에 붙음' });
+const bulkDone = el('button', { className: 'primary done' });
+function renderBulk() { bulkDone.textContent = `보이는 영상 ${shown.length}개에 붙이기`; }
+bulkDone.onclick = () => {
+  const typed = parseTags(bulkTa.value);
+  if (!typed.length || !shown.length) return;
+  for (const f of shown) { // 한 번에 모아 저장
+    const next = [...new Set([...tagsOf(f), ...typed])];
+    if (next.length === tagsOf(f).length) continue;
+    gallery.tags[f.id] = next;
+    pendingSaves.set('t:' + f.id, next);
+  }
+  const n = shown.length;
+  bulkTa.value = '';
+  renderGrid();
+  flushSaves();
+  setStatus(`보이는 영상 ${n}개에 태그 ${typed.map(t => `(${t})`).join(' ')} 를 붙였어요.`);
+};
+memoKeys(bulkTa, () => bulkDone.click());
+$('#bulkTag').append(el('div', { className: 'memo' }, bulkTa, bulkDone));
+
 // ---------- 영상 창의 태그 칸 ----------
 // 위: 이 영상의 알약들 (+ = 하나 추가(다른 영상 태그를 많은 순으로 추천), 수정 = 전체를 메모 칸에 펼쳐 고치기)
 // 아래: 늘 열려 있는 메모 칸. 쉼표(띄어쓰기도 쉼표로 바뀜)로 적고 Enter·[작성 완료] → 알약으로 위에 붙고 칸은 비워짐.
@@ -1517,26 +1598,10 @@ function tagBox(f) {
     render();
     ta.focus();
   };
-  // Enter = 작성 완료. 한글 입력 중(조합 중)에 누른 Enter 는 글자가 확정된 뒤 처리
-  let enterPending = false;
-  ta.onkeydown = e => {
-    if (e.key === 'Escape' && editAll) { e.preventDefault(); e.stopPropagation(); editAll = false; ta.value = ''; return; }
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    e.preventDefault();
-    if (e.isComposing || e.keyCode === 229) enterPending = true; else done.click();
-  };
-  ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(() => done.click()); } });
-  // 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
-  ta.addEventListener('input', e => {
-    if (e.isComposing) return;
-    const v = ta.value, at = ta.selectionStart;
-    const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
-    const next = fix(v);
-    if (next === v) return;
-    const caret = fix(v.slice(0, at)).length;
-    ta.value = next;
-    ta.setSelectionRange(caret, caret);
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && editAll) { e.preventDefault(); e.stopPropagation(); editAll = false; ta.value = ''; }
   });
+  memoKeys(ta, () => done.click());
 
   // 수정 ON: "모든 태그" 줄. 누르면 이 영상에 바로 붙음 (전체 고치는 중이면 메모 칸 끝에 이어 적음)
   const allTags = () => {
@@ -2329,9 +2394,10 @@ async function start() {
   renderEditBtn();
   setStatus('불러오는 중…');
   try {
-    await loadGallery();
-    flushSaves(); // 로그인이 만료돼 멈췄던 저장이 있으면 이어서
-    await openFolder();
+    // 목록과 gallery.json 을 동시에 받음 (전에는 gallery.json 을 다 받은 뒤에야 목록을 시작)
+    const galleryLoading = loadGallery().then(() => flushSaves()); // 로그인이 만료돼 멈췄던 저장이 있으면 이어서
+    galleryLoading.catch(() => {});
+    await openFolder(galleryLoading);
   } catch (e) { handleError(e); }
 }
 
