@@ -911,7 +911,10 @@ function directPlayer(f) {
     let trail = '';
     try { // 워커가 중계한 최근 요청 기록: 플레이어가 물은 범위→드라이브 응답 상태 · 보낸 범위 · 대기 시간(·미리 = 미리 받은 조각)
       const lg = await (await fetch('stream/_log')).json();
-      trail = lg.slice(-6).map(x => `${x.range}→${x.up} ${x.out} ${(x.ms / 1000).toFixed(1)}s${x.pre ? '·미리' : ''}`).join(' | ');
+      trail = lg.slice(-6).map(x => {
+        const [a, b] = x.out.split('-').map(Number); // 보낸 범위와 드라이브가 준 길이가 다르면 함께 표시. '자름' = 워커가 본문을 가공한 응답
+        return `${x.range}→${x.up} ${x.out}${x.cl && x.cl !== b - a + 1 ? `(받음 ${x.cl})` : ''} ${(x.ms / 1000).toFixed(1)}s${x.pre ? '·미리' : ''}${x.raw === false ? '·자름' : ''}`;
+      }).join(' | ');
     } catch {}
     let probe = '';
     try { // 같은 경로로 2바이트만 받아 보며 어디서 막혔는지 확인

@@ -6,11 +6,13 @@
 // - 재생(play=1): 한 응답은 PLAY_CHUNK 경계까지만 주되(아이폰에서 검증된 작은 응답), 이어지는 조각 AHEAD 개를 미리 요청해 둔다.
 //   요청마다 드라이브 응답 대기(0.5~1초)가 붙는데, 미리 받아 두면 플레이어가 다음 조각을 물을 때 바로 흘려보낼 수 있어
 //   고화질 영상도 끊기지 않는다. 미리 받은 조각은 60초 안에 안 쓰이거나 다른 영상을 열면 버린다.
+// - 본문은 드라이브 응답 스트림을 손대지 않고 그대로 넘긴다. 아이폰 미디어 로더는 워커가 JS 로 가공한 스트림(TransformStream 등)을
+//   본문으로 받지 못해 헤더만 받고 오류 4 를 낸다(2026-10-16 기록으로 확인). 길이가 안 맞을 때(통째 200 등)만 잘라서 보낸다.
 // - stream/_log: 최근 중계 기록(진단용). 페이지가 재생 실패 안내에 붙여 보여준다.
 const DRIVE = 'https://www.googleapis.com/drive/v3';
 const CHUNK = 4 * 1024 * 1024;
 const PLAY_CHUNK = 4 * 1024 * 1024; // 아이폰에서 재생이 확인된 응답 크기
-const AHEAD = 4; // 미리 받아 둘 조각 수 (최대 16MB 가 워커 메모리에 머묾)
+const AHEAD = 2; // 미리 받아 둘 조각 수 (최대 8MB 가 워커 메모리에 머묾 — 아이폰 워커 메모리를 아끼려 작게)
 const PREFETCH_TTL = 60 * 1000;
 let auth = null; // { token, exp }
 const prefetches = new Map(); // `${id}:${start}` → { id, t, ctrl, p: Promise<Response> } (start 은 PLAY_CHUNK 경계)
@@ -101,22 +103,27 @@ async function stream(id, size, type, req, play) {
   const chunkEnd = play ? (Math.floor(start / PLAY_CHUNK) + 1) * PLAY_CHUNK - 1 : start + CHUNK - 1;
   let end = Math.min(reqEnd, chunkEnd, size - 1);
   const t0 = Date.now();
-  const pre = play ? takePrefetch(id, start) : null;
+  // 미리 받은 조각은 길이가 정확히 맞을 때만 쓴다(본문을 자르지 않고 그대로 넘기기 위해). 짧게 물으면 그만큼만 새로 받는다
+  const pre = play && end === Math.min(chunkEnd, size - 1) ? takePrefetch(id, start) : null;
   let up = pre ? await pre.p.catch(() => null) : null;
   if (!up) up = await fetchRange(token, id, start, end, req.signal);
   if (play) prefetch(token, id, (Math.floor(end / PLAY_CHUNK) + 1) * PLAY_CHUNK, size);
-  log.push({ id: id.slice(-6), range: `${start}-${r && r[2] ? r[2] : ''}`, out: `${start}-${end}`, up: up.status, pre: !!pre, ms: Date.now() - t0 });
+  const entry = { id: id.slice(-6), range: `${start}-${r && r[2] ? r[2] : ''}`, out: `${start}-${end}`, up: up.status, pre: !!pre, ms: Date.now() - t0 };
+  log.push(entry);
   if (log.length > 12) log.shift();
   // 206 이 아니면서 처음부터 통째로 주는 200 도 아니면(중간부터 물었는데 200 등) 즉시 끊는다
   if (up.status !== 206 && !(up.status === 200 && start === 0)) {
     if (up.body) up.body.cancel();
     return new Response(null, { status: up.ok ? 502 : up.status });
   }
-  // 드라이브가 요청보다 덜 줬으면(206 의 길이) 그만큼만 범위로 잡고, 더 주면(200·미리 받은 조각) 필요한 만큼만 잘라 보낸다
-  const len = up.status === 206 ? +up.headers.get('Content-Length') || 0 : 0;
-  if (len && len < end - start + 1) end = start + len - 1;
+  // 드라이브가 요청보다 덜 줬으면(206 의 길이) 그만큼만 범위로 잡는다
+  const len = +up.headers.get('Content-Length') || 0;
+  if (up.status === 206 && len && len < end - start + 1) end = start + len - 1;
   const want = end - start + 1;
-  return new Response(limit(up.body, want), {
+  // 길이가 맞으면(또는 길이를 모르면) 드라이브 스트림 그대로. 통째 200 이나 더 긴 206 만 잘라서
+  const raw = up.status === 206 ? !len || len === want : want === size;
+  entry.cl = len; entry.raw = raw;
+  return new Response(raw ? up.body : limit(up.body, want), {
     status: 206,
     headers: {
       'Content-Type': type,
