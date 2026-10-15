@@ -108,6 +108,9 @@
     -webkit-mask: var(--pen) center / contain no-repeat; mask: var(--pen) center / contain no-repeat;
     --pen: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3Cpath d='M14.5 5.5l4 4'/%3E%3C/svg%3E"); }
   .pill .pen:hover { opacity: 1; }
+  .m-in.card-in { padding: 2px 6px; font-size: 13px; border-color: var(--accent); }
+  body.editing .card .name:not(.dur-line) { cursor: text; }
+  body.editing .card .name:not(.dur-line):hover { text-decoration: underline dotted; }
   .m-in.pill-in { width: 140px; padding: 4px 10px; border-radius: 999px; font-size: 13px; }
   .memo { position: relative; }
   .memo textarea { width: 100%; min-height: 72px; resize: vertical; padding: 8px 10px 40px; border-radius: 10px;
@@ -973,8 +976,15 @@ function videoCard(f) {
   // 폰: 영상 창에서 파일을 직접 재생(sw.js). 이 브라우저가 못 푸는 형식(avi·mkv·wmv 등)은 수정 OFF 면 바로 드라이브(앱)로
   const open = () => isPhone && !canPlayDirect(f) && !document.body.classList.contains('editing')
     ? (location.href = `https://drive.google.com/file/d/${f.id}/view`) : openViewer(f);
+  const nameEl = el('div', { className: 'name', textContent: f.name, title: f.name });
+  // 수정 ON: 카드 제목을 누르면 영상 창 대신 그 자리에서 이름 바꾸기
+  nameEl.onclick = e => {
+    if (!document.body.classList.contains('editing')) return;
+    e.stopPropagation();
+    startCardRename(f, nameEl);
+  };
   const card = el('button', { className: 'card', onclick: open },
-    thumb, el('div', { className: 'name', textContent: f.name, title: f.name }),
+    thumb, nameEl,
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
@@ -1321,6 +1331,33 @@ function startRename(f) {
   input.onkeydown = e => {
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     else if (e.key === 'Escape') { e.preventDefault(); finish(false); } // 창이 닫히지 않게
+  };
+  input.onblur = () => finish(true);
+}
+
+// 목록 카드의 제목 자리에서 이름 바꾸기 (Enter·다른 곳 클릭 = 저장, Esc = 취소). 카드(버튼)로 클릭·키가 새지 않게 막음
+function startCardRename(f, nameEl) {
+  if (nameEl.querySelector('input')) return;
+  const input = el('input', { className: 'm-in card-in', value: f.name, spellcheck: false });
+  for (const ev of ['click', 'keyup', 'pointerdown']) input.addEventListener(ev, e => e.stopPropagation());
+  nameEl.replaceChildren(input);
+  input.focus();
+  const dot = f.name.lastIndexOf('.');
+  input.setSelectionRange(0, dot > 0 ? dot : f.name.length);
+  let done = false;
+  const finish = async save => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    nameEl.textContent = f.name;
+    if (!save || !name || name === f.name) return;
+    if (!await ensureWriteScope()) return;
+    renameVideo(f, name);
+  };
+  input.onkeydown = e => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
   };
   input.onblur = () => finish(true);
 }
