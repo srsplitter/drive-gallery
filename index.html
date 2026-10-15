@@ -789,7 +789,14 @@ function showCandidates(f, iframe, box, captureBtn) {
   let slots = null, filled = [];
   const render = () => {
     if (!box.isConnected) return j.subs.delete(render); // 창을 닫았거나 다른 화면으로 바뀜
-    if (j.status === 'unsupported' || j.status === 'aborted') {
+    if (j.status === 'aborted') {
+      // 미리 뽑기 정리 중에 취소된 작업 → 실패가 아니므로 버튼 대신 새로 다시 뽑음
+      j.subs.delete(render);
+      if (candJobs.get(f.id) === j) candJobs.delete(f.id);
+      box.replaceChildren();
+      return showCandidates(f, iframe, box, captureBtn);
+    }
+    if (j.status === 'unsupported') {
       j.subs.delete(render);
       return box.replaceChildren(
         el('button', { className: 'ext-only', textContent: '🎞️ 플레이어로 대표 장면 뽑기 (플레이어가 3~4초 움직여요)',
