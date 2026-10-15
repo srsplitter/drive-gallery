@@ -524,7 +524,10 @@ function openViewer(f) {
       await new Promise(r => setTimeout(r, i ? 1500 : 1200));
       if (!viewer.open || viewerFile !== f || !extReady || !document.body.classList.contains('editing')) return;
       const st = await extCall('player', { action: 'state' }).catch(() => null);
-      if (st && st.duration) return showState(st); // 불러와짐
+      if (st && st.duration) { // 불러와짐 (음소거로 자동 재생했으면 소리 다시 켬)
+        if (clicked) extCall('player', { action: 'unmute' }).catch(() => {});
+        return showState(st);
+      }
       if (i === 4) break;
       const k = await extCall('player', { action: 'kick' }).catch(e => ({ clicked: e.message }));
       clicked = k.clicked || clicked;

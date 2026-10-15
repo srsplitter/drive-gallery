@@ -47,7 +47,22 @@ async function capture(tab) {
   }
 }
 
+// 페이지 쪽(MAIN world)에서 실행 — 유튜브 플레이어 자체 함수(playVideo 등)는 페이지 쪽에서만 보인다
+function inFramesMain(tab, func) {
+  return chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, world: 'MAIN', func })
+    .then((rs) => rs.map((r) => r.result).filter(Boolean), () => []);
+}
+
 async function player(tab, action, delta) {
+  if (action === 'kick') {
+    // 드라이브 플레이어 안은 유튜브 플레이어: 처음엔 <video> 가 비어 있어 video.play() 로는 안 됨 → 플레이어에 직접 재생 명령
+    const main = await inFramesMain(tab, frameKickMain);
+    if (main.length) return { ok: true, kicked: true, clicked: main.join(' / ') };
+  }
+  if (action === 'unmute') {
+    await inFramesMain(tab, frameUnmuteMain);
+    return { ok: true };
+  }
   const frames = (await inFrames(tab, framePlayer, [action, delta])).map((r) => r.result).filter(Boolean);
   if (action === 'kick') {
     const kicked = frames.filter((r) => r.kicked);
@@ -59,7 +74,28 @@ async function player(tab, action, delta) {
   return { ok: false, error: `플레이어 영상을 찾지 못했어요. 찾아본 프레임: ${seen}` };
 }
 
-// ↓ 아래 두 함수는 각 프레임 안에서 실행됨 (바깥 변수 사용 불가). 최상위(갤러리 페이지)에서는 아무것도 안 함.
+// ↓ 아래 함수들은 각 프레임 안에서 실행됨 (바깥 변수 사용 불가). 최상위(갤러리 페이지)에서는 아무것도 안 함.
+
+// 유튜브 플레이어에 재생 명령. 소리 있는 자동 재생은 브라우저가 막을 수 있어 음소거로 시작(멈춘 뒤 소리 다시 켬)
+function frameKickMain() {
+  if (window === window.top) return null;
+  const p = document.getElementById('movie_player');
+  if (!p || typeof p.playVideo !== 'function') return null;
+  try {
+    if (typeof p.mute === 'function') p.mute();
+    p.playVideo();
+  } catch (e) {
+    return location.hostname + ' → 유튜브 플레이어 오류: ' + e.message;
+  }
+  return location.hostname + ' → 유튜브 플레이어 재생(음소거)';
+}
+
+function frameUnmuteMain() {
+  if (window === window.top) return null;
+  const p = document.getElementById('movie_player');
+  if (p && typeof p.unMute === 'function') { p.unMute(); return true; }
+  return null;
+}
 
 // 찍는 순간 영상(<video>)과 하위 iframe 말고 모든 요소(컨트롤·제목·버튼)를 숨김 / 되돌림
 function frameHideUi(hide) {
@@ -108,7 +144,9 @@ async function framePlayer(action, delta) {
   if (action === 'kick') {
     // 영상 불러오기: 영상이 있으면 재생(수정 모드면 autopause.js 가 곧 멈춤),
     // 아직 없으면 "재생/Play" 라벨이 붙은 버튼, 없으면 화면 가운데를 클릭. 무엇을 눌렀는지 알려줌(진단용)
-    if (v) { v.play().catch(() => {}); return { where, videos: found.length, kicked: true, clicked: 'video.play()' }; }
+    // 영상이 이미 불러와져 있을 때만 video.play() (비어 있는 영상은 재생 명령이 먹지 않음)
+    if (v && v.readyState > 0) { v.play().catch(() => {}); return { where, videos: found.length, kicked: true, clicked: 'video.play()' }; }
+    const ytButton = document.querySelector('.ytp-large-play-button, .ytp-play-button');
     const describe = (e) => !e ? '없음' : e.tagName.toLowerCase()
       + (e.getAttribute('aria-label') ? `[${e.getAttribute('aria-label')}]` : '')
       + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/)[0] : '');
@@ -116,7 +154,7 @@ async function framePlayer(action, delta) {
       // "재생", "재생(k)", "Play (k)" 만 ("재생 속도" 같은 다른 버튼은 제외)
       /^\s*(재생|play)\s*(\(.*\))?\s*$/i.test(e.getAttribute('aria-label') || e.getAttribute('title') || '') && e.offsetWidth > 0 && e.offsetHeight > 0);
     const x = innerWidth / 2, y = innerHeight / 2;
-    const target = labelled || document.elementFromPoint(x, y);
+    const target = ytButton || labelled || document.elementFromPoint(x, y);
     if (!target || target.tagName === 'IFRAME') return { where, videos: 0 }; // 가운데가 하위 iframe 이면 그 안의 이 함수가 처리
     const r = target.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     for (const type of ['pointerover', 'pointerenter', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
