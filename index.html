@@ -42,22 +42,56 @@
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
-  /* 폰: 왼쪽 아래 원형 버튼으로 2단 → 3단 → 4단 → 2단 (목록이 보일 때만) */
-  #colsBtn { display: none; position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20;
-    width: 52px; height: 52px; padding: 0; border-radius: 50%; font-size: 14px; font-weight: 700;
+  /* 왼쪽 아래 ☰ 메뉴 버튼 (목록이 보일 때만) → 태그·통합·시간·카테고리 검색, 단 수(폰), 랜덤 */
+  #menuBtn { position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20;
+    width: 52px; height: 52px; padding: 0; border-radius: 50%; display: grid; place-items: center;
     background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); }
-  @media (max-width: 520px), (pointer: coarse) { #colsBtn { display: block; } }
-  #catbar[hidden] ~ #colsBtn { display: none; }
-  /* 길이: PC는 썸네일 위, 폰은 이름 아래 줄(이름과 같은 글자 크기) */
-  .dur-line { display: none; color: var(--dim); }
-  .card .name.dur-line { padding-top: 0; }
-  @media (max-width: 520px), (pointer: coarse) { .badge.dur { display: none; } .dur-line { display: block; } }
-  body[data-cols] .cat-grid { grid-template-columns: repeat(var(--cols), 1fr); }
-  body[data-cols="3"] .cat-grid { gap: 8px; }
-  body[data-cols="4"] .cat-grid { gap: 6px; }
-  body[data-cols="4"] .name { font-size: 11px; padding: 5px 6px; }
-  body[data-cols="4"] .badge { font-size: 10px; padding: 0 4px; bottom: 4px; right: 4px; }
-  body[data-cols="4"] .badge.pin { left: 4px; }
+  #menuBtn.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(0,0,0,.5); }
+  #menuBtn i, #menuBtn i::before, #menuBtn i::after { display: block; width: 20px; height: 2px; background: var(--text); border-radius: 1px; position: relative; }
+  #menuBtn i::before, #menuBtn i::after { content: ''; position: absolute; left: 0; }
+  #menuBtn i::before { top: -6px; } #menuBtn i::after { top: 6px; }
+  #catbar[hidden] ~ #menuBtn { display: none; }
+  #menu { width: min(420px, 100vw - 16px); max-height: min(85dvh, 760px); margin: auto auto 16px 16px; }
+  @media (max-width: 520px) { #menu { width: 100vw; max-width: none; margin: auto 0 0; border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom); } }
+  .m-body { padding: 12px 14px; display: grid; gap: 14px; }
+  .m-sec { display: grid; gap: 6px; }
+  .m-sec > b { font-size: 13px; color: var(--dim); font-weight: 600; }
+  .m-in { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg);
+    color: var(--text); font: inherit; }
+  .m-in:focus { outline: none; border-color: var(--accent); }
+  .m-time { display: flex; gap: 8px; align-items: center; }
+  .m-time .m-in { width: 90px; text-align: center; }
+  .seg { display: flex; } .seg button { border-radius: 0; padding: 6px 12px; } .seg button + button { margin-left: -1px; }
+  .seg button:first-child { border-radius: 10px 0 0 10px; } .seg button:last-child { border-radius: 0 10px 10px 0; }
+  .seg button.on, .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .phone-only { display: none !important; }
+  @media (max-width: 520px), (pointer: coarse) { .phone-only { display: flex !important; } }
+  /* 태그 알약: ★(즐겨찾기, 노랑) 이름 (개수) */
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 13px; display: inline-flex; gap: 4px; align-items: center; }
+  .pill .star { color: var(--dim); } .pill .star.fav { color: #ffc531; }
+  .pill .cnt { color: var(--dim); font-size: 12px; }
+  .pill.on .cnt, .pill.on .star:not(.fav) { color: inherit; }
+  .pill.ghost { border-style: dashed; color: var(--dim); }
+  .memo { position: relative; }
+  .memo textarea { width: 100%; min-height: 72px; resize: vertical; padding: 8px 10px 40px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  .memo textarea:focus { outline: none; border-color: var(--accent); }
+  .memo .done { position: absolute; right: 8px; bottom: 10px; padding: 4px 12px; font-size: 13px; }
+  .tag-add { display: grid; gap: 6px; }
+  /* 길이: PC는 썸네일 위, 폰은 이름 아래 줄(구분선 + 오른쪽 정렬 + 흐린 색) */
+  .dur-line { display: none; color: #6b717c; text-align: right; border-top: 1px solid var(--line); }
+  .card .name.dur-line { padding-top: 4px; padding-bottom: 4px; }
+  @media (max-width: 520px), (pointer: coarse) {
+    .badge.dur { display: none; } .dur-line { display: block; }
+    body[data-cols] .cat-grid { grid-template-columns: repeat(var(--cols), 1fr); }
+    body[data-cols="3"] .cat-grid { gap: 8px; }
+    body[data-cols="4"] .cat-grid { gap: 6px; }
+    body[data-cols="4"] .name { font-size: 11px; padding: 5px 6px; }
+    body[data-cols="4"] .badge { font-size: 10px; padding: 0 4px; bottom: 4px; right: 4px; }
+    body[data-cols="4"] .badge.pin { left: 4px; }
+  }
   /* 카테고리 바: 화면 맨 위에 붙어 따라옴(모든 기기). 바깥(#catbar)은 고정만, 안쪽(.catscroll)은 가로 스크롤만 —
      둘을 한 요소에 같이 두면 일부 폰 브라우저에서 고정이 풀리거나 페이지 전체가 옆으로 밀림 */
   #catbar { position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
@@ -133,7 +167,10 @@
   /* 제목줄은 고정, 아래 내용만 세로로 밀어서 볼 수 있게. 영상(폰 기본 플레이어)은 남는 높이를 다 쓰고 비율은 유지 */
   dialog.page[open] { display: flex; flex-direction: column; overflow: hidden; }
   dialog.page .v-head { flex: none; }
-  dialog.page .v-body { padding: 8px; flex: 1; min-height: 0; overflow: auto; align-content: start; }
+  /* 세로로만 스크롤(가로로 밀면 이전/다음 영상), 끝에 닿아도 뒤 목록으로 스크롤이 넘어가지 않게 */
+  dialog.page .v-body { padding: 8px; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; align-content: start;
+    touch-action: pan-y; overscroll-behavior: contain; }
+  dialog.page { overscroll-behavior: contain; }
   dialog.page .frame { aspect-ratio: auto; height: calc(100dvh - 130px); min-height: 180px; max-height: none; object-fit: contain; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hint { color: var(--dim); font-size: 13px; }
@@ -153,7 +190,7 @@
   <button id="authBtn" hidden></button>
 </header>
 <nav id="catbar" hidden></nav>
-<button id="colsBtn" aria-label="한 줄에 보이는 영상 수 바꾸기"></button>
+<button id="menuBtn" aria-label="메뉴 (검색·정렬)"><i></i></button>
 <main>
   <section id="setup" class="notice" hidden>
     <h2>처음 설정</h2>
@@ -176,6 +213,14 @@
     <button id="vClose" aria-label="닫기">✕</button>
   </div>
   <div class="v-body" id="vBody"></div>
+</dialog>
+
+<dialog id="menu">
+  <div class="v-head">
+    <div class="title">☰ 메뉴</div>
+    <button id="menuClose" aria-label="닫기">✕</button>
+  </div>
+  <div class="m-body" id="mBody"></div>
 </dialog>
 
 <script>
@@ -349,27 +394,60 @@ async function api(url, opts = {}) {
 }
 
 // ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
-// gallery.json: { videos: { 영상ID: 지정 썸네일 }, hidden: { 영상ID: true(갤러리에서만 숨김) } }
-let gallery = { videos: {}, hidden: {} }, galleryFileId = null;
-// 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null). 화면에는 이미 반영돼 있다.
+// gallery.json: { videos: { 영상ID: 지정 썸네일 }, hidden: { 영상ID: true(갤러리에서만 숨김) },
+//                 tags: { 영상ID: [태그…] }, fav: { 태그: true(즐겨찾기) } }
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {} }, galleryFileId = null;
+// 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
+// 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
 let saving = false, saveError = '', retryTimer = null;
 
 async function readRemote() {
   const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
   const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
-  if (!files.length) return { fileId: null, data: { videos: {}, hidden: {} } };
-  const data = await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json();
-  data.videos = data.videos || {};
-  data.hidden = data.hidden || {};
-  return { fileId: files[0].id, data };
+  const data = files.length ? await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json() : {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav']) data[k] = data[k] || {};
+  return { fileId: files.length ? files[0].id : null, data };
 }
 
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
-    const [map, id] = key.startsWith('h:') ? [data.hidden, key.slice(2)] : [data.videos, key];
+    const m = CHANGE_MAPS[key.slice(0, 2)];
+    const [map, id] = m ? [data[m], key.slice(2)] : [data.videos, key];
     if (val) map[id] = val; else delete map[id];
   }
+}
+
+// ---------- 태그 (영상마다 알약, ★ 즐겨찾기) ----------
+const tagsOf = f => gallery.tags[f.id] || [];
+const isFav = t => !!gallery.fav[t];
+// "4k, 게임 ,4k" → ['4k', '게임'] (쉼표·줄바꿈으로 나눔, 앞뒤 공백 제거, 중복 제거)
+const parseTags = s => [...new Set(s.split(/[,，\n]/).map(t => t.trim()).filter(Boolean))];
+
+function setTags(f, tags) {
+  tags = [...new Set(tags)];
+  if (tags.length) gallery.tags[f.id] = tags; else delete gallery.tags[f.id];
+  pendingSaves.set('t:' + f.id, tags.length ? tags : null);
+  renderGrid();
+  flushSaves();
+}
+function toggleFav(t) {
+  if (isFav(t)) delete gallery.fav[t]; else gallery.fav[t] = true;
+  pendingSaves.set('f:' + t, isFav(t) || null);
+  flushSaves();
+}
+// 태그 → 그 태그가 붙은 영상 수 (많은 순)
+function tagCounts() {
+  const n = new Map();
+  for (const f of items) for (const t of tagsOf(f)) n.set(t, (n.get(t) || 0) + 1);
+  return new Map([...n].sort((a, b) => b[1] - a[1]));
+}
+// 알약: ★/☆ 이름 (개수). onStar 가 있으면 별만 따로 눌림
+function pill(t, count, { onclick, onStar, on } = {}) {
+  const star = el('span', { className: 'star' + (isFav(t) ? ' fav' : ''), textContent: isFav(t) ? '★' : '☆' });
+  if (onStar) star.onclick = e => { e.stopPropagation(); onStar(); };
+  return el('button', { className: 'pill' + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
 }
 
 const isHidden = f => !!gallery.hidden[f.id];
@@ -446,16 +524,136 @@ window.addEventListener('beforeunload', e => { if (pendingSaves.size) { e.preven
 // 폴더 밖(내 드라이브 맨 위) 영상은 "내 드라이브" 구역. 같은 이름의 폴더는 한 카테고리로 합쳐짐.
 let items = []; // 화면 순서(카테고리 → 이름)대로 모든 영상
 
-// 왼쪽 아래 원형 버튼: 누를 때마다 한 줄에 2 → 3 → 4 → 2개 (이 기기에 기억)
+// ---------- ☰ 메뉴: 검색 조건(태그·통합·시간·카테고리) + 단 수(폰) + 랜덤 ----------
+// 조건은 모두 함께 적용(AND). 검색 조건은 [검색]을 눌러야, 단 수·랜덤은 누르는 즉시 반영.
+let filters = { tags: [], text: '', min: null, max: null, cats: [] };
+let randomRank = null; // 영상 ID → 순번 (랜덤 정렬 중일 때)
+let shown = []; // 지금 화면에 보이는 순서대로의 영상 (영상 창에서 옆으로 밀어 이전/다음)
+const filterCount = () => filters.tags.length + !!filters.text + (filters.min != null || filters.max != null) + filters.cats.length;
+
+// 한 줄에 보이는 영상 수 (폰만, 이 기기에 기억)
 function setCols(n) {
   document.body.dataset.cols = n;
   document.body.style.setProperty('--cols', n);
-  $('#colsBtn').textContent = n + '단';
   try { localStorage.setItem('cols', n); } catch {}
 }
-$('#colsBtn').onclick = () => { const n = +document.body.dataset.cols || 2; setCols(n >= 4 ? 2 : n + 1); };
 try { if (localStorage.getItem('cols')) setCols(+localStorage.getItem('cols')); } catch {}
-if (!document.body.dataset.cols) $('#colsBtn').textContent = '2단';
+
+function matchesFilters(f) {
+  const tags = tagsOf(f), lc = s => s.toLowerCase();
+  if (filters.tags.length && !filters.tags.every(t => tags.includes(t))) return false;
+  if (filters.text) {
+    const q = lc(filters.text);
+    if (!lc(f.name).includes(q) && !tags.some(t => lc(t).includes(q))) return false;
+  }
+  if (filters.min != null || filters.max != null) {
+    const sec = f.videoMediaMetadata ? +f.videoMediaMetadata.durationMillis / 1000 : NaN;
+    if (!(sec >= 0)) return false; // 길이를 모르는 영상은 시간 조건에서 뺌
+    if (filters.min != null && sec < filters.min * 60) return false;
+    if (filters.max != null && sec > filters.max * 60) return false;
+  }
+  if (filters.cats.length && !filters.cats.includes(f.category)) return false;
+  return true;
+}
+
+const menu = $('#menu');
+$('#menuClose').onclick = () => menu.close();
+menu.addEventListener('click', e => { if (e.target === menu) menu.close(); }); // 바깥(어두운 곳) 누르면 닫힘
+$('#menuBtn').onclick = () => { renderMenu(); menu.showModal(); };
+
+function renderMenu() {
+  const editing = document.body.classList.contains('editing');
+  const draft = { ...filters, tags: [...filters.tags], cats: [...filters.cats] }; // [검색] 전까지는 여기만 바뀜
+  const counts = tagCounts();
+
+  // 태그 검색: 고른 태그(✕로 빼기) + 입력 + 추천 알약
+  const chosen = el('div', { className: 'pills' });
+  const tagIn = el('input', { className: 'm-in', placeholder: '태그 입력 (예: 4k)', enterKeyHint: 'search' });
+  const sugg = el('div', { className: 'pills' });
+  const drawTags = () => {
+    chosen.replaceChildren(...draft.tags.map(t => {
+      const p = pill(t, 0, { on: true, onclick: () => { draft.tags = draft.tags.filter(x => x !== t); drawTags(); } });
+      p.append(' ✕');
+      return p;
+    }));
+    const q = tagIn.value.trim().toLowerCase();
+    const pool = [...counts.keys()].filter(t => !draft.tags.includes(t));
+    let list = q ? pool.filter(t => t.toLowerCase().includes(q)).slice(0, 12) : [];
+    if (!list.length) { // 비었거나 맞는 게 없으면: 즐겨찾기 5개, 없으면 많이 쓴 태그 5개
+      const favs = pool.filter(isFav);
+      list = (favs.length ? favs : pool).slice(0, 5);
+    }
+    sugg.replaceChildren(...list.map(t => pill(t, counts.get(t), {
+      onclick: () => { draft.tags.push(t); tagIn.value = ''; drawTags(); },
+      onStar: editing ? () => { toggleFav(t); drawTags(); } : null })));
+  };
+  tagIn.oninput = drawTags;
+  tagIn.onkeydown = e => {
+    if (e.key !== 'Enter') return;
+    const q = tagIn.value.trim().toLowerCase();
+    const hit = [...counts.keys()].find(t => t.toLowerCase() === q) || [...counts.keys()].find(t => t.toLowerCase().includes(q));
+    if (q && hit && !draft.tags.includes(hit)) { draft.tags.push(hit); tagIn.value = ''; drawTags(); }
+  };
+  drawTags();
+
+  const textIn = el('input', { className: 'm-in', placeholder: '제목 또는 태그에 들어간 글자', value: draft.text, enterKeyHint: 'search' });
+  const minIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최소', value: draft.min ?? '' });
+  const maxIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최대', value: draft.max ?? '' });
+
+  // 카테고리(드라이브 폴더) 여러 개 선택. 아무것도 안 고르면 전체
+  const cats = [...new Set(items.map(f => f.category))];
+  const catBox = el('div', { className: 'pills' }, ...cats.map(c => {
+    const b = el('button', { className: 'chip' + (draft.cats.includes(c) ? ' on' : ''), textContent: c });
+    b.onclick = () => {
+      draft.cats = draft.cats.includes(c) ? draft.cats.filter(x => x !== c) : [...draft.cats, c];
+      b.classList.toggle('on', draft.cats.includes(c));
+    };
+    return b;
+  }));
+
+  const num = v => (v.trim() === '' || !(+v >= 0) ? null : +v);
+  const apply = () => {
+    draft.text = textIn.value.trim();
+    draft.min = num(minIn.value);
+    draft.max = num(maxIn.value);
+    filters = draft;
+    menu.close();
+    renderGrid();
+    scrollTo(0, 0);
+  };
+  textIn.onkeydown = minIn.onkeydown = maxIn.onkeydown = e => { if (e.key === 'Enter') apply(); };
+
+  // 단 수(폰) + 랜덤: 누르는 즉시 반영
+  const cur = +document.body.dataset.cols || 2;
+  const seg = el('div', { className: 'seg phone-only' }, ...[1, 2, 3, 4].map(n => el('button', {
+    className: n === cur ? 'on' : '', textContent: n + '단',
+    onclick: e => { setCols(n); for (const b of seg.children) b.classList.toggle('on', b === e.currentTarget); } })));
+  const randBtn = el('button', { textContent: '🔀 랜덤', onclick: () => { shuffleShown(); renderMenu(); } });
+  const sortBtn = randomRank ? el('button', { textContent: '가나다순', onclick: () => { randomRank = null; renderGrid(); renderMenu(); } }) : null;
+
+  $('#mBody').replaceChildren(
+    el('div', { className: 'm-sec' }, el('b', { textContent: '태그 검색 (고른 태그가 모두 있는 영상만)' }), chosen, tagIn, sugg,
+      editing ? el('p', { className: 'hint', style: 'margin:0', textContent: '수정 ON: 알약의 ☆ 를 누르면 즐겨찾기' }) : null),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '통합 검색' }), textIn),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '길이 (분)' }),
+      el('div', { className: 'm-time' }, minIn, el('span', { textContent: '~' }), maxIn, el('span', { className: 'hint', textContent: '분' }))),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '카테고리 (여러 개 선택)' }), catBox),
+    el('div', { className: 'row' },
+      el('button', { className: 'primary', style: 'flex:1', textContent: '검색', onclick: apply }),
+      el('button', { textContent: '조건 지우기', onclick: () => {
+        filters = { tags: [], text: '', min: null, max: null, cats: [] }; renderGrid(); renderMenu(); } })),
+    el('div', { className: 'row' }, seg, randBtn, sortBtn),
+    editing ? bracketTool() : null);
+}
+
+// 지금 보이는 영상들만 순서를 섞음(조건은 그대로). 카테고리 구역은 유지하고 구역 안에서 섞음
+function shuffleShown() {
+  randomRank = new Map();
+  const ids = shown.map(f => f.id);
+  for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+  ids.forEach((id, i) => randomRank.set(id, i));
+  renderGrid();
+}
 
 async function listAllVideos() {
   const q = "mimeType contains 'video/' and trashed = false and 'me' in owners";
@@ -532,19 +730,29 @@ function renderGrid() {
   if (hiddenCount) $('#crumbs').append(el('button', { className: 'edit-only small',
     textContent: showHidden ? `🙈 숨긴 영상 ${hiddenCount}개 감추기` : `🙈 숨긴 영상 ${hiddenCount}개 보기`,
     onclick: () => { showHidden = !showHidden; renderGrid(); } }));
+  // ☰ 메뉴 검색 조건이 걸려 있으면 위쪽에 표시 + 바로 지우기
+  const nf = filterCount();
+  $('#menuBtn').classList.toggle('on', nf > 0);
+  if (nf) $('#crumbs').append(el('button', { className: 'small', textContent: `🔎 조건 ${nf}개 ✕`, title: '검색 조건 지우기',
+    onclick: () => { filters = { tags: [], text: '', min: null, max: null, cats: [] }; renderGrid(); } }));
   const groups = new Map();
   for (const f of visible) {
     if (query && !f.name.toLowerCase().includes(query)) continue; // 🔍 파일 이름 검색
+    if (!matchesFilters(f)) continue;
     if (!groups.has(f.category)) groups.set(f.category, []);
     groups.get(f.category).push(f);
   }
+  // 🔀 랜덤: 구역 안에서 섞인 순서대로 (새로 보이게 된 영상은 뒤로)
+  if (randomRank) for (const list of groups.values()) list.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
+  shown = [...groups.values()].flat();
   const sections = [...groups].map(([cat, list]) => ({ cat, count: list.filter(f => !isHidden(f)).length,
     el: el('section', { className: 'cat' },
       el('h2', { className: 'cat-title', textContent: `${cat} · ${list.filter(f => !isHidden(f)).length}개` }),
       el('div', { className: 'cat-grid' }, ...list.map(videoCard))) }));
   $('#grid').replaceChildren(...sections.map(s => s.el));
   if (query && !sections.length) setStatus(`"${query}" 이(가) 들어간 파일이 없어요.`);
-  else if (query) setStatus('');
+  else if (nf && !sections.length) setStatus('조건에 맞는 영상이 없어요.');
+  else if (query || $('#status').textContent === '조건에 맞는 영상이 없어요.') setStatus('');
   renderCatbar(sections);
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -725,12 +933,47 @@ function directPlayer(f) {
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
 viewer.addEventListener('close', () => {
-  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); }
+  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); lockPage(false); }
   if (history.state && history.state.viewer) history.back(); // 폰 페이지: 열 때 넣은 기록을 되돌림
 });
 $('#vClose').onclick = () => viewer.close();
 // 폰의 뒤로 가기(제스처·버튼)로 영상 페이지 닫기
 addEventListener('popstate', () => { if (viewer.open && !(history.state && history.state.viewer)) viewer.close(); });
+
+// 폰 영상 페이지가 열린 동안 뒤의 목록을 고정: 안 그러면 아이폰에서 밀 때 목록이 같이 스크롤되며
+// 주소창이 줄었다 늘었다 해서 페이지가 위로 붕 뜨고 아래 목록이 비쳐 보임
+let lockedY = null;
+function lockPage(on) {
+  const s = document.body.style;
+  if (on && lockedY === null) {
+    lockedY = scrollY;
+    Object.assign(s, { position: 'fixed', top: -lockedY + 'px', left: '0', right: '0' });
+  } else if (!on && lockedY !== null) {
+    Object.assign(s, { position: '', top: '', left: '', right: '' });
+    scrollTo(0, lockedY);
+    lockedY = null;
+  }
+}
+
+// 영상 창에서 옆으로 밀면 이전/다음 영상 (지금 목록에 보이는 순서). 세로로 미는 건 그대로 스크롤.
+// 영상 아래쪽 컨트롤(재생 위치 막대)과 입력칸에서 시작한 건 무시
+let swipe = null;
+viewer.addEventListener('touchstart', e => {
+  const t = e.touches[0], target = e.target;
+  swipe = null;
+  if (e.touches.length !== 1 || target.closest('input, textarea, .cropper')) return;
+  if (target.tagName === 'VIDEO' && t.clientY > target.getBoundingClientRect().bottom - 80) return;
+  swipe = { x: t.clientX, y: t.clientY, at: Date.now() };
+}, { passive: true });
+viewer.addEventListener('touchend', e => {
+  if (!swipe || !viewerFile) return;
+  const t = e.changedTouches[0], dx = t.clientX - swipe.x, dy = t.clientY - swipe.y;
+  const ok = Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2 && Date.now() - swipe.at < 700;
+  swipe = null;
+  if (!ok) return;
+  const i = shown.indexOf(viewerFile), next = shown[i + (dx < 0 ? 1 : -1)];
+  if (i >= 0 && next) openViewer(next);
+}, { passive: true });
 
 let viewerFile = null;
 
@@ -777,6 +1020,7 @@ function openViewer(f) {
       canFullscreen || iframe.tagName === 'VIDEO' ? el('button', { textContent: '⛶ 전체화면', onclick: () => fullscreen(iframe) }) : null,
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
+    tagBox(f),
     cands,
     fileInput,
     el('div', { id: 'preview', className: 'edit-only' }),
@@ -792,7 +1036,9 @@ function openViewer(f) {
   // 폰: 작은 창 대신 화면 전체 페이지 + 왼쪽 위 ← 돌아가기 (뒤로 가기로도 닫힘)
   viewer.classList.toggle('page', !canCapture);
   $('#vClose').textContent = canCapture ? '✕' : '← 돌아가기';
-  viewer.showModal();
+  if (!viewer.open) viewer.showModal(); // 옆으로 밀어 다음 영상을 열 땐 이미 열려 있음
+  if (!canCapture) lockPage(true);
+  $('#vBody').scrollTop = 0;
   if (!canCapture && !(history.state && history.state.viewer)) history.pushState({ viewer: 1 }, '');
   // 수정 ON + 확장: 창을 열면 영상을 자동으로 불러옴(재생 → 0.3초 뒤 자동 멈춤) → 드라이브 시간 조절바가 바로 보임.
   // 불러오는 동안은 대표 장면 뽑기를 잠시 멈춰 플레이어가 인터넷을 먼저 쓰게 함.
@@ -910,6 +1156,107 @@ async function renameVideo(f, name) {
     }
     setStatus(`이름을 바꾸지 못했어요: ${e.message}`, true);
   }
+}
+
+// ---------- 영상 창의 태그 칸 ----------
+// 태그가 없으면 메모 칸(쉼표로 구분해 한 번에 적고 [작성 완료]) → 알약으로 정리.
+// 알약 끝 (+) = 하나 추가(다른 영상에 붙은 태그를 많은 순으로 추천), (수정) = 전체를 다시 메모 칸으로.
+// 수정 ON 에서 알약을 누르면 즐겨찾기(★) 켜고 끄기.
+function tagBox(f) {
+  const box = el('div', { className: 'tag-box' });
+  const memo = () => {
+    const ta = el('textarea', { value: tagsOf(f).join(', '), placeholder: '태그를 쉼표로 구분해 적어 주세요 (예: 4k, 게임, 이미지)' });
+    const done = el('button', { className: 'primary done', textContent: '작성 완료',
+      onclick: () => { setTags(f, parseTags(ta.value)); pills(); } });
+    box.replaceChildren(el('div', { className: 'memo' }, ta, done));
+    return ta;
+  };
+  const pills = () => {
+    if (!tagsOf(f).length) return memo();
+    const counts = tagCounts();
+    const editing = document.body.classList.contains('editing');
+    box.replaceChildren(el('div', { className: 'pills' },
+      ...tagsOf(f).map(t => pill(t, counts.get(t), { onclick: editing ? () => { toggleFav(t); pills(); } : null })),
+      el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
+      el('button', { className: 'pill ghost', textContent: '수정', onclick: () => memo().focus() })));
+  };
+  const adder = () => {
+    const counts = tagCounts();
+    const input = el('input', { className: 'm-in', placeholder: '추가할 태그', enterKeyHint: 'done' });
+    const sugg = el('div', { className: 'pills' });
+    const add = t => { t = t.trim(); if (t) setTags(f, [...tagsOf(f), t]); pills(); };
+    const draw = () => { // 이 영상엔 없는, 다른 영상의 태그를 많은 순으로
+      const q = input.value.trim().toLowerCase();
+      sugg.replaceChildren(...[...counts.keys()].filter(t => !tagsOf(f).includes(t) && (!q || t.toLowerCase().includes(q)))
+        .slice(0, 20).map(t => pill(t, counts.get(t), { onclick: () => add(t) })));
+    };
+    input.oninput = draw;
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(input.value); } else if (e.key === 'Escape') { e.preventDefault(); pills(); } };
+    box.replaceChildren(el('div', { className: 'tag-add' },
+      el('div', { className: 'row' }, el('div', { style: 'flex:1' }, input),
+        el('button', { className: 'primary', textContent: '추가', onclick: () => add(input.value) }),
+        el('button', { textContent: '취소', onclick: pills })),
+      sugg));
+    draw();
+    input.focus();
+  };
+  pills();
+  return box;
+}
+
+// ---------- 제목의 [ ] → 태그 (☰ 메뉴, 수정 ON) ----------
+// "[겨울왕국][4k] 누구냐 얘.mp4" → 태그 (겨울왕국)(4k) + 이름 "누구냐 얘.mp4". [ ] 안의 쉼표도 태그로 나눔.
+// 이름에서 [ ] 를 빼면 아무것도 안 남는 파일은 이름은 그대로 두고 태그만 붙임.
+function splitBrackets(name) {
+  const tags = [];
+  const rest = name.replace(/\[([^\[\]]*)\]/g, (_, t) => { tags.push(...parseTags(t)); return ' '; });
+  const dot = rest.lastIndexOf('.');
+  const base = (dot > 0 ? rest.slice(0, dot) : rest).replace(/\s+/g, ' ').trim();
+  const ext = dot > 0 ? rest.slice(dot).trim() : '';
+  return { tags, name: base ? base + ext : name };
+}
+
+function bracketTool() {
+  const todo = items.filter(f => /\[[^\[\]]*\]/.test(f.name));
+  if (!todo.length) return null;
+  const btn = el('button', { textContent: `제목의 [ ] ${todo.length}개를 태그로 옮기기` });
+  const sample = splitBrackets(todo[0].name);
+  const hint = el('p', { className: 'hint', style: 'margin:0',
+    textContent: `예: "${todo[0].name}" → 태그 ${sample.tags.map(t => `(${t})`).join(' ')} + 이름 "${sample.name}". 드라이브 파일 이름이 바뀌어요.` });
+  let armed = false;
+  btn.onclick = async () => {
+    if (!armed) { armed = true; btn.textContent = `✅ ${todo.length}개 바꾸기 (한 번 더 누르면 시작)`; btn.className = 'primary'; return; }
+    if (!await ensureWriteScope()) return;
+    menu.close();
+    convertBrackets(todo);
+  };
+  return el('div', { className: 'm-sec' }, el('b', { textContent: '제목 정리' }), btn, hint);
+}
+
+async function convertBrackets(list) {
+  // 태그는 한 번에 붙여 저장, 이름은 하나씩 바꿈(진행 상황 표시). 이름 바꾸기에 실패한 건 원래 이름 그대로
+  for (const f of list) {
+    const { tags } = splitBrackets(f.name);
+    const merged = [...new Set([...tagsOf(f), ...tags])];
+    if (merged.length) { gallery.tags[f.id] = merged; pendingSaves.set('t:' + f.id, merged); }
+  }
+  flushSaves();
+  let done = 0, failed = 0;
+  for (const f of list) {
+    const { name } = splitBrackets(f.name);
+    setStatus(`제목 정리 중… ${done + failed + 1}/${list.length}`);
+    if (name === f.name) { done++; continue; }
+    try {
+      await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      f.name = name;
+      done++;
+    } catch (e) {
+      if (e instanceof AuthError) { renderGrid(); return handleError(e); }
+      failed++;
+    }
+  }
+  renderGrid();
+  setStatus(failed ? `제목 정리: ${done}개 완료, ${failed}개는 이름을 못 바꿨어요(태그는 붙음).` : `제목 정리 완료: ${done}개 (태그로 옮기고 [ ] 를 뺐어요).`, !!failed);
 }
 
 // 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
