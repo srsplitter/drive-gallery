@@ -638,6 +638,18 @@ async function streamReady() {
     return true;
   } catch { return false; }
 }
+// 드라이브 파일을 sw.js 로 필요한 부분만 받아 <video> 로 재생. 준비가 안 되거나 재생 오류면 fallback()
+function directPlayer(f, fallback) {
+  const v = el('video', { className: 'frame', controls: true, playsInline: true, preload: 'metadata' });
+  const fail = () => { if (viewerFile === f && v.isConnected) fallback(); };
+  v.onerror = fail;
+  streamReady().then(ok => {
+    if (!ok || !(+f.size > 0)) return fail();
+    if (viewerFile === f && v.isConnected) v.src = 'stream/' + f.id + '?' + new URLSearchParams({ size: f.size, type: f.mimeType || 'video/mp4' });
+  });
+  return v;
+}
+
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
 viewer.addEventListener('close', () => { if (!viewer.open) { closeViewerResources(); prefetchCandidates(); } });
 $('#vClose').onclick = () => viewer.close();
@@ -650,10 +662,13 @@ function openViewer(f) {
   $('#vTitle').textContent = f.name;
   $('#vTitle').onclick = () => { if (document.body.classList.contains('editing')) startRename(f); }; // 수정 ON: 이름 바꾸기
   const custom = gallery.videos[f.id];
-  const iframe = el('iframe', { className: 'frame', src: `https://drive.google.com/file/d/${f.id}/preview`, allow: 'autoplay; fullscreen', allowFullscreen: true });
+  const drivePlayer = () => el('iframe', { className: 'frame', src: `https://drive.google.com/file/d/${f.id}/preview`, allow: 'autoplay; fullscreen', allowFullscreen: true });
   const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
   fileInput.onchange = () => { if (fileInput.files[0]) previewImage(f, fileInput.files[0], imageBtn); };
   const canCapture = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  // 폰(화면 캡처 없음): 드라이브 플레이어는 로그인 쿠키를 못 받아 G 로고에서 멈추므로, 파일을 직접 받아 기본 플레이어로 재생.
+  // 못 틀면 드라이브 플레이어로 되돌림.
+  const iframe = canCapture ? drivePlayer() : directPlayer(f, () => playerWrap.replaceChildren(drivePlayer()));
   // edit-only: 수정 모드(ON)에서만 보임
   const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
