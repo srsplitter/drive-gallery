@@ -52,6 +52,7 @@
   .thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   .player-wrap { position: relative; }
   .row.end { justify-content: flex-end; }
+  .card.next-todo { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
   button.danger { background: #c62828; border-color: #c62828; color: #fff; }
   body.editing #vTitle { cursor: text; }
   body.editing #vTitle:hover { text-decoration: underline dotted; }
@@ -217,7 +218,7 @@ function setEditMode(on) {
   renderEditBtn();
   syncAutoPause();
   if (on && viewer.open && viewerUI && viewerUI.startCands) viewerUI.startCands(); // 창을 연 채 수정을 켜면 대표 장면 시작
-  if (on) prefetchCandidates();
+  if (on) { prefetchCandidates(); scrollToNextTodo(); }
 }
 
 // 확장에 수정 ON/OFF 를 알림 → ON 이면 영상을 클릭해 재생하는 순간 바로 멈춤 (⏯ 로 재생한 건 제외)
@@ -371,7 +372,19 @@ async function openFolder() {
     items = await listFolder(path[path.length - 1].id);
     setStatus(items.length ? '' : '이 폴더에는 영상이나 하위 폴더가 없어요.');
     renderGrid();
+    scrollToNextTodo();
   } catch (e) { handleError(e); }
+}
+
+// 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (폴더를 열 때·수정을 켤 때)
+function scrollToNextTodo() {
+  if (!document.body.classList.contains('editing')) return;
+  const i = items.findIndex(x => x.mimeType !== 'application/vnd.google-apps.folder' && !gallery.videos[x.id]);
+  const card = i >= 0 && $('#grid').children[i];
+  if (!card) return;
+  for (const c of $('#grid').querySelectorAll('.card.next-todo')) c.classList.remove('next-todo');
+  card.classList.add('next-todo');
+  card.scrollIntoView({ block: 'center' });
 }
 
 function renderGrid() {
