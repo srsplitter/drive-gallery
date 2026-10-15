@@ -197,8 +197,47 @@ function restoreToken() {
   } catch {}
 }
 
+// 구글 로그인(토큰)은 서버 없는 사이트에선 1시간짜리라, 끝나면 로그아웃 버튼을 "🔑 다시 로그인"으로 바꿈.
+// 누르면 그 자리에서 다시 로그인하고 멈췄던 저장·대표 장면 뽑기를 이어서 함 (화면은 그대로)
+function markExpired() {
+  const b = $('#authBtn');
+  if (b.hidden || b.dataset.expired) return;
+  b.dataset.expired = '1';
+  b.textContent = '🔑 다시 로그인';
+  b.className = 'primary';
+}
+
+async function relogin() {
+  try {
+    await requestToken(hasScope(SCOPE_WRITE) ? SCOPE_WRITE : undefined); // 받아 둔 수정 권한도 유지
+  } catch (e) { return setStatus('로그인 실패: ' + e.message, true); }
+  const b = $('#authBtn');
+  delete b.dataset.expired;
+  b.textContent = '로그아웃';
+  b.className = '';
+  saveError = '';
+  setStatus('');
+  if (!$('#grid').children.length) return start(); // 목록을 못 불러온 채 만료됐으면 다시 불러옴
+  flushSaves();
+  prefetchCandidates();
+  runCandJobs();
+}
+
+// 만료 10분 전부터는 사이트를 클릭할 때 로그인을 미리 연장 (이미 허용한 거라 구글 창이 잠깐 떴다 닫힘)
+let renewing = false;
+document.addEventListener('pointerdown', () => {
+  if (!token || renewing || $('#authBtn').dataset.expired || tokenExp - Date.now() > 10 * 60 * 1000) return;
+  renewing = true;
+  requestToken(hasScope(SCOPE_WRITE) ? SCOPE_WRITE : undefined).catch(() => {}).finally(() => { renewing = false; });
+}, true);
+// 클릭이 없어도 만료되면 바로 버튼을 바꿔 둠
+setInterval(() => { if (token && Date.now() > tokenExp) markExpired(); }, 30000);
+
 function showLoggedOut(msg) {
   token = null;
+  delete $('#authBtn').dataset.expired;
+  $('#authBtn').className = '';
+  $('#authBtn').textContent = '로그아웃';
   sessionStorage.removeItem('tok');
   if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({});
   $('#grid').replaceChildren();
@@ -245,9 +284,9 @@ function renderEditBtn(note) {
 }
 
 async function api(url, opts = {}) {
-  if (!token || Date.now() > tokenExp) throw new AuthError('로그인이 만료됐어요. 다시 로그인해 주세요.');
+  if (!token || Date.now() > tokenExp) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
   const res = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
-  if (res.status === 401) throw new AuthError('로그인이 만료됐어요. 다시 로그인해 주세요.');
+  if (res.status === 401) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
   if (!res.ok) throw new Error(`드라이브 요청 실패 (${res.status})`);
   return res;
 }
@@ -309,7 +348,7 @@ async function flushSaves() {
     saveError = '';
   } catch (e) {
     if (e instanceof AuthError) {
-      saveError = '로그인이 만료돼 저장을 멈췄어요. 다시 로그인하면 이어서 저장해요.';
+      saveError = '로그인 시간이 끝나 저장을 멈췄어요. 위쪽 🔑 다시 로그인을 누르면 이어서 저장해요.';
     } else {
       saveError = '저장하지 못했어요. 잠시 뒤 다시 시도해요.';
       retryTimer = setTimeout(flushSaves, 5000);
@@ -417,8 +456,11 @@ function videoCard(f) {
 }
 
 function handleError(e) {
-  if (e instanceof AuthError) showLoggedOut(e.message);
-  else setStatus(e.message || String(e), true);
+  if (!(e instanceof AuthError)) return setStatus(e.message || String(e), true);
+  // 작업 중에 만료되면 화면은 그대로 두고 "🔑 다시 로그인" 버튼만. (로그인 전이면 로그인 화면으로)
+  if ($('#authBtn').hidden) return showLoggedOut(e.message);
+  markExpired();
+  setStatus(e.message, true);
 }
 
 // ---------- 재생 / 썸네일 지정 ----------
@@ -1449,7 +1491,7 @@ $('#editBtn').onclick = async () => {
   setEditMode(!document.body.classList.contains('editing'));
 };
 $('#authBtn').textContent = '로그아웃';
-$('#authBtn').onclick = () => showLoggedOut('로그아웃했어요.');
+$('#authBtn').onclick = () => $('#authBtn').dataset.expired ? relogin() : showLoggedOut('로그아웃했어요.');
 $('#loginBtn').onclick = async () => {
   try { await requestToken(); start(); } catch (e) { setStatus('로그인 실패: ' + e.message, true); }
 };
