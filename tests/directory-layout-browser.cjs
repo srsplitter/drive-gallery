@@ -41,7 +41,11 @@ const root=path.resolve(__dirname,'..');
     });
     const widths=await tiles().evaluateAll(ns=>ns.map(n=>n.getBoundingClientRect().width));
     assert.ok(Math.max(...widths)-Math.min(...widths)<2);
-    assert.equal(await tiles().first().evaluate(n=>n.querySelector('.cover-thumb').getBoundingClientRect().bottom<=n.querySelector('.directory-name').getBoundingClientRect().top),true);
+    assert.equal(await tiles().first().evaluate(n=>{
+      const name=n.querySelector('.directory-name').getBoundingClientRect(),count=n.querySelector('.cnt').getBoundingClientRect();
+      const image=n.querySelector('.cover-thumb').getBoundingClientRect(),button=n.querySelector('.pill').getBoundingClientRect();
+      return name.bottom<=image.top&&Math.abs(name.y-count.y)<3&&Math.abs(image.width-(button.width-2))<3;
+    }),true);
     const before=await tiles().nth(4).boundingBox();
     await tiles().nth(4).locator('.cover-thumb').click();
     const after=await tiles().nth(4).boundingBox();assert.ok(Math.abs(before.y-after.y)<1);

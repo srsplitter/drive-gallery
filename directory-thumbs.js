@@ -74,6 +74,11 @@ const DirectoryThumbs = (() => {
       for (const node of [...button.childNodes]) {
         if (node.nodeType === 3 && node.textContent === name) node.replaceWith(el('span', { className: 'directory-name', textContent: name, title: name }));
       }
+      const heading = el('span', { className: 'directory-heading' });
+      heading.append(button.querySelector('.directory-name'));
+      const count = button.querySelector('.cnt');
+      if (count) heading.append(count);
+      button.prepend(heading);
       button.title = name;
     }
     if (cover) button.prepend(thumbnail(cover));

@@ -293,14 +293,15 @@
 .card.order-after { box-shadow: 5px 0 0 #e5b94c; }
   .directory-item { min-width: 0; max-width: 100%; }
   .tag-directory { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; align-items: start; }
-  .tag-directory > .directory-item > .pill { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: 45px 22px 20px; gap: 4px; justify-items: center; width: 100%; height: 115px; min-width: 0; padding: 6px 8px; border-radius: 12px; }
-  .tag-directory .pill > .cover-thumb { grid-column: 1 / -1; grid-row: 1; }
-  .tag-directory .directory-name { grid-column: 1 / -1; grid-row: 2; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+  .tag-directory > .directory-item > .pill { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: auto; gap: 0; justify-items: center; width: 100%; height: auto; min-width: 0; padding: 0; overflow: hidden; border-radius: 12px; }
+  .tag-directory .directory-heading { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-width: 0; min-height: 38px; padding: 8px; white-space: nowrap; }
+  .tag-directory .pill > .cover-thumb { grid-column: 1 / -1; grid-row: 2; width: 100%; aspect-ratio: 16 / 9; border-radius: 0; }
+  .tag-directory .directory-name { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
   .tag-directory .star { grid-column: 1; grid-row: 3; }
-  .tag-directory .cnt { grid-column: 2; grid-row: 3; }
-  .tag-directory .pen { grid-column: 3; grid-row: 3; }
-  .tag-directory .bin { grid-column: 4; grid-row: 3; }
-  body:not(.editing) .tag-directory .cnt { grid-column: 1 / -1; }
+  .tag-directory .pen { grid-column: 2; grid-row: 3; }
+  .tag-directory .bin { grid-column: 3; grid-row: 3; }
+  body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin { margin: 8px 0; }
+  body:not(.editing) .tag-directory .star, body:not(.editing) .tag-directory .pen, body:not(.editing) .tag-directory .bin { display: none; }
   .tag-directory .star, .tag-directory .cnt, .tag-directory .pen, .tag-directory .bin { flex: none; }
   .directory-cover-row { grid-column: 1 / -1; min-width: 0; }
   .directory-cover-row .cover-candidates { max-width: 100%; }
