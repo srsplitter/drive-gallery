@@ -193,7 +193,18 @@
   /* 하트: 썸네일 오른쪽 위 핑크 하트 + 흰 테두리, 숨김 표시가 있으면 그 아래로 */
   .love-badge { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
   .love-badge path { fill: #ff4f9a; stroke: #fff; stroke-width: 2; }
+  .card.mark-star .thumb::after, .card.mark-square .thumb::after, .card.loved .thumb::after {
+    content: ''; position: absolute; inset: 0; border: 3px solid #57b878; pointer-events: none; }
+  .card.mark-square .thumb::after { border-color: #a77950; }
+  .card.loved .thumb::after { border-color: #ff4f9a; }
   .card.is-hidden.loved .badge.hid { top: 32px; }
+  .mark-btn { padding: 4px 8px; font-size: 22px; line-height: 1; }
+  #vStar.on { color: #57b878; border-color: #57b878; }
+  #vSquare.on { color: #a77950; border-color: #a77950; }
+  #directoryMemos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 24px 0 88px; }
+  body:not(.editing) .tag-directory .star { display: none; }
+  @media (max-width: 520px) { #directoryMemos { grid-template-columns: 1fr; } }
+  #directoryMemos[hidden], #bulkTag[hidden] { display: none; }
   body[data-cols="4"] .love-badge { width: 16px; height: 16px; top: 4px; right: 4px; }
   /* 영상 창 제목 오른쪽 하트 버튼 */
   .heart-btn { padding: 4px 8px; display: grid; place-items: center; }
@@ -255,7 +266,7 @@
 <body>
 <header>
   <h1>🎬 영상 갤러리</h1>
-  <nav id="crumbs"></nav>
+  <div id="crumbs"></div>
   <span id="saveState"></span>
   <button id="pauseBtn" class="edit-only ext-only" title="수정 ON 에서 영상을 재생하면 바로 멈추기"></button>
   <span class="edit-wrap"><button id="editBtn" hidden></button><div id="editNote" hidden></div></span>
@@ -278,12 +289,15 @@
   <div id="status"></div>
   <div id="grid"></div>
   <div id="bulkTag" class="edit-only"></div>
+  <div id="directoryMemos" class="edit-only" hidden></div>
 </main>
 
 <dialog id="viewer">
   <div class="v-head">
     <div class="title" id="vTitle"></div>
     <button id="vHeart" class="edit-only heart-btn" title="즐겨찾기 (하트)"></button>
+    <button id="vStar" class="edit-only mark-btn" title="별 표시" aria-label="별 표시">☆</button>
+    <button id="vSquare" class="edit-only mark-btn" title="네모 표시" aria-label="네모 표시">□</button>
     <button id="vClose" aria-label="닫기">✕</button>
   </div>
   <div class="v-body" id="vBody"></div>
@@ -298,6 +312,7 @@
   <div class="m-body" id="mBody"></div>
 </dialog>
 
+<script src="gallery-order.js"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -438,6 +453,7 @@ function setEditMode(on) {
   syncAutoPause();
   if (on && viewer.open && viewerUI && viewerUI.startCands) viewerUI.startCands(); // 창을 연 채 수정을 켜면 대표 장면 시작
   if (items.length) renderGrid(); // 숨긴 영상 보기는 수정 ON 에서만
+  if (menu.open) renderMenu();
   if (on) scrollToNextTodo();
 }
 
@@ -498,7 +514,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -527,11 +543,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -643,7 +659,26 @@ function renderHeartBtn(f) {
   const b = $('#vHeart');
   b.replaceChildren(heartSvg(isLoved(f), 'heart-ico'));
   b.classList.toggle('loved', isLoved(f));
+  b.setAttribute('aria-pressed', String(isLoved(f)));
+  renderMarkBtns(f);
   b.onclick = () => { setLoved(f, !isLoved(f)); renderHeartBtn(f); };
+}
+
+function renderMarkBtns(f) {
+  for (const [kind, id, off, on] of [['star', '#vStar', '☆', '★'], ['square', '#vSquare', '□', '■']]) {
+    const b = $(id), active = gallery.marks[f.id] === kind;
+    b.textContent = active ? on : off;
+    b.classList.toggle('on', active);
+    b.setAttribute('aria-pressed', String(active));
+    b.onclick = () => {
+      const next = gallery.marks[f.id] === kind ? null : kind;
+      if (next) gallery.marks[f.id] = next; else delete gallery.marks[f.id];
+      pendingSaves.set('m:' + f.id, next);
+      renderGrid();
+      renderMarkBtns(f);
+      flushSaves();
+    };
+  }
 }
 
 // ---------- 태그 (영상마다 알약, ★ 즐겨찾기) ----------
@@ -660,15 +695,24 @@ function setTags(f, tags) {
   flushSaves();
 }
 function toggleFav(t) {
+  if (!document.body.classList.contains('editing')) return;
   if (isFav(t)) delete gallery.fav[t]; else gallery.fav[t] = true;
   pendingSaves.set('f:' + t, isFav(t) || null);
   flushSaves();
 }
 // 태그 → 그 태그가 붙은 영상 수 (많은 순)
 function tagCounts() {
-  const n = new Map();
-  for (const f of items) for (const t of tagsOf(f)) n.set(t, (n.get(t) || 0) + 1);
-  return new Map([...n].sort((a, b) => b[1] - a[1]));
+  return new Map([...window.GalleryOrder.countTags(items, gallery)].sort((a, b) =>
+    b[1] - a[1] || window.GalleryOrder.compareText(a[0], b[0])));
+}
+function sortedTags(f, counts = tagCounts()) {
+  return [...tagsOf(f)].sort((a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || window.GalleryOrder.compareText(a, b));
+}
+const tagKind = t => gallery.tagKinds[t] || 'normal';
+function setTagKind(t, kind) {
+  if (!document.body.classList.contains('editing')) return;
+  if (kind === 'normal') delete gallery.tagKinds[t]; else gallery.tagKinds[t] = kind;
+  pendingSaves.set('k:' + t, kind === 'normal' ? null : kind);
 }
 // 알약: ★/☆ 이름 (개수). onStar 가 있으면 별만 따로 눌림
 // onRename 이 있으면(수정 ON) 오른쪽에 연필 — 누르면 그 자리에서 이름 바꾸기
@@ -699,6 +743,9 @@ function pill(t, count, { onclick, onStar, on, onRename, onDelete, confirm } = {
 
 // 태그를 모든 영상에서 지움 (즐겨찾기·필터 기록·검색 조건에서도)
 function deleteTag(t) {
+  if (!document.body.classList.contains('editing')) return;
+  delete gallery.tagKinds[t];
+  pendingSaves.set('k:' + t, null);
   for (const f of items) {
     if (!tagsOf(f).includes(t)) continue;
     const next = tagsOf(f).filter(x => x !== t);
@@ -710,7 +757,8 @@ function deleteTag(t) {
   const drop = list => list.filter(x => x !== t);
   filters.tags = drop(filters.tags);
   filters.ex = drop(filters.ex);
-  if (menuDraft) { menuDraft.tags = drop(menuDraft.tags); menuDraft.ex = drop(menuDraft.ex); }
+  filters.cats = drop(filters.cats);
+  if (menuDraft) { menuDraft.tags = drop(menuDraft.tags); menuDraft.ex = drop(menuDraft.ex); menuDraft.cats = drop(menuDraft.cats); }
   renderGrid();
   flushSaves();
 }
@@ -738,6 +786,11 @@ function editTagInline(p, t, after) {
 
 // 태그 이름 바꾸기: 그 태그가 붙은 모든 영상에 적용(이미 새 이름이 붙어 있으면 하나로 합침). 즐겨찾기·검색 조건도 따라감
 function renameTag(from, to) {
+  if (!document.body.classList.contains('editing')) return;
+  const kind = tagKind(from);
+  delete gallery.tagKinds[from];
+  pendingSaves.set('k:' + from, null);
+  setTagKind(to, kind);
   for (const f of items) {
     const tags = tagsOf(f);
     if (!tags.includes(from)) continue;
@@ -754,7 +807,8 @@ function renameTag(from, to) {
   const swap = list => [...new Set(list.map(x => (x === from ? to : x)))];
   filters.tags = swap(filters.tags);
   filters.ex = swap(filters.ex);
-  if (menuDraft) { menuDraft.tags = swap(menuDraft.tags); menuDraft.ex = swap(menuDraft.ex); }
+  filters.cats = swap(filters.cats);
+  if (menuDraft) { menuDraft.tags = swap(menuDraft.tags); menuDraft.ex = swap(menuDraft.ex); menuDraft.cats = swap(menuDraft.cats); }
   renderGrid();
   flushSaves();
 }
@@ -853,9 +907,8 @@ function renderSaveState() {
 window.addEventListener('beforeunload', e => { if (pendingSaves.size) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- 모든 영상 (드라이브 폴더 = 카테고리) ----------
-// 내가 올린 영상을 한 번에 모두 가져와, 들어 있는 드라이브 폴더 이름을 카테고리로 삼아 한 화면에 구역별로 보여줌.
-// 폴더 밖(내 드라이브 맨 위) 영상은 "내 드라이브" 구역. 같은 이름의 폴더는 한 카테고리로 합쳐짐.
-let items = []; // 화면 순서(카테고리 → 이름)대로 모든 영상
+// 내가 올린 모든 영상. 표시 순서는 GalleryOrder가 정한다.
+let items = [];
 
 // ---------- ☰ 메뉴: 검색 조건(태그·통합·시간·카테고리) + 단 수(폰) + 랜덤 ----------
 // 조건은 모두 함께 적용(AND). 검색 조건은 [검색]을 눌러야, 단 수·랜덤은 누르는 즉시 반영.
@@ -886,7 +939,7 @@ function matchesFilters(f) {
     if (filters.min != null && sec < filters.min * 60) return false;
     if (filters.max != null && sec > filters.max * 60) return false;
   }
-  if (filters.cats.length && !filters.cats.includes(f.category)) return false;
+  if (filters.cats.length && !filters.cats.some(t => tags.includes(t) && tagKind(t) === 'category')) return false;
   return true;
 }
 
@@ -1003,7 +1056,7 @@ function renderMenu() {
   const maxIn = el('input', { className: 'm-in', type: 'number', min: 0, inputMode: 'numeric', placeholder: '최대', value: draft.max ?? '',
     oninput: () => { draft.max = num(maxIn.value); } });
 
-  // 카테고리(드라이브 폴더) 여러 개 선택 — 위쪽 카테고리 바 [편집]에서 표시하기로 한 것만. 아무것도 안 고르면 전체
+  // 카테고리 유형 태그 여러 개 선택. 아무것도 안 고르면 전체
   const catBox = el('div', { className: 'pills' }, ...shownCats().map(c => {
     const b = el('button', { className: 'chip' + (draft.cats.includes(c) ? ' on' : ''), textContent: c });
     b.onclick = () => {
@@ -1021,6 +1074,7 @@ function renderMenu() {
       pendingSaves.set('x:' + t, gallery.exUse[t]);
     }
     if (draft.ex.length) flushSaves();
+    currentView = '';
     renderGrid();
     scrollTo(0, 0);
     if (phoneMenu()) closeMenu(); else placeMenu();
@@ -1045,7 +1099,7 @@ function renderMenu() {
     ...(editing ? [bracketTool()] : []).filter(Boolean));
 }
 
-// 지금 보이는 영상들만 순서를 섞음(조건은 그대로). 카테고리 구역은 유지하고 구역 안에서 섞음
+// 지금 보이는 영상들만 순서를 섞음(조건은 그대로).
 function shuffleShown() {
   randomRank = new Map();
   const ids = shown.map(f => f.id);
@@ -1069,42 +1123,24 @@ async function listAllVideos() {
   return out;
 }
 
-// 폴더 ID → 이름 (내 드라이브 맨 위는 "내 드라이브")
-async function folderNames(ids) {
-  const names = new Map();
-  const root = await (await api(`${DRIVE}/files/root?fields=id`)).json();
-  await Promise.all(ids.map(async id => {
-    if (id === root.id) return names.set(id, '내 드라이브');
-    try { names.set(id, (await (await api(`${DRIVE}/files/${id}?fields=name`)).json()).name); }
-    catch (e) { if (e instanceof AuthError) throw e; names.set(id, '기타'); }
-  }));
-  return names;
-}
-
 function setStatus(msg, isError) {
   const s = $('#status');
   s.textContent = msg;
   s.className = isError ? 'error' : '';
 }
 
-// (이름은 예전 그대로) 모든 영상을 불러와 카테고리별로 그림
+// (이름은 예전 그대로) 모든 영상을 불러와 한 그리드로 그림
 // galleryLoading: 같이 받고 있는 gallery.json (숨김·썸네일·태그). 숨긴 영상이 잠깐이라도 보이지 않게 이걸 기다린 뒤 그림
 async function openFolder(galleryLoading) {
-  $('#crumbs').replaceChildren(el('a', { textContent: '모든 영상' }));
+  $('#crumbs').replaceChildren(el('span', { textContent: '모든 영상' }));
   $('#grid').replaceChildren();
   setStatus('영상 목록 받는 중…');
   try {
     const vids = await listAllVideos();
-    setStatus(`영상 ${vids.length}개 찾음 · 폴더 이름 확인 중…`);
-    const names = await folderNames([...new Set(vids.map(v => (v.parents || [])[0]).filter(Boolean))]);
     if (galleryLoading) {
       setStatus(`영상 ${vids.length}개 찾음 · 썸네일·태그 정보 받는 중…`);
       await galleryLoading;
     }
-    for (const v of vids) v.category = names.get((v.parents || [])[0]) || '기타';
-    const coll = new Intl.Collator('ko', { numeric: true });
-    const rank = c => (c === '내 드라이브' ? 0 : 1);
-    vids.sort((a, b) => rank(a.category) - rank(b.category) || coll.compare(a.category, b.category) || coll.compare(a.name, b.name));
     items = vids;
     setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
     renderGrid();
@@ -1114,9 +1150,9 @@ async function openFolder(galleryLoading) {
 
 // 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (목록을 열 때·수정을 켤 때·다시 로그인할 때)
 function scrollToNextTodo() {
-  if (!document.body.classList.contains('editing')) return;
+  if (!document.body.classList.contains('editing') || currentView) return;
   const f = items.find(x => !gallery.videos[x.id] && !isHidden(x));
-  const card = f && $('#grid').querySelector(`.cat:not(.fav-cat) .card[data-id="${CSS.escape(f.id)}"]`);
+  const card = f && $('#grid').querySelector(`.card[data-id="${CSS.escape(f.id)}"]`);
   if (!card) return;
   for (const c of $('#grid').querySelectorAll('.card.next-todo')) c.classList.remove('next-todo');
   card.classList.add('next-todo');
@@ -1126,13 +1162,13 @@ function scrollToNextTodo() {
 // 숨긴 영상도 같이 보기 (수정 ON 에서만, 흐리게) — 다시 열어 "숨김 해제"할 수 있게
 let showHidden = false;
 
-// 카테고리 구역: 제목(카테고리 · 개수) + 영상 카드들. 숨긴 영상은 빼고(또는 흐리게) 보여줌
+// 영상 그리드 또는 선택한 유형의 태그 디렉터리.
 function renderGrid() {
   thumbObserver.disconnect(); // 지난번 카드는 버려지므로 지켜보던 것도 놓음
   const editing = document.body.classList.contains('editing');
   const hiddenCount = items.filter(isHidden).length;
   const visible = items.filter(f => !isHidden(f) || (showHidden && editing));
-  $('#crumbs').replaceChildren(el('a', { textContent: `모든 영상 · ${items.length - hiddenCount}개` }));
+  $('#crumbs').replaceChildren(el('span', { textContent: `모든 영상 · ${items.length - hiddenCount}개` }));
   if (hiddenCount) $('#crumbs').append(el('button', { className: 'edit-only small',
     textContent: showHidden ? `🙈 숨긴 영상 ${hiddenCount}개 감추기` : `🙈 숨긴 영상 ${hiddenCount}개 보기`,
     onclick: () => { showHidden = !showHidden; renderGrid(); } }));
@@ -1141,76 +1177,95 @@ function renderGrid() {
   $('#menuBtn').classList.toggle('on', nf > 0);
   if (nf) $('#crumbs').append(el('button', { className: 'small', textContent: `🔎 조건 ${nf}개 ✕`, title: '검색 조건 지우기',
     onclick: () => { filters = EMPTY_FILTERS(); menuDraft = null; renderGrid(); if (menu.open) renderMenu(); } }));
-  const groups = new Map();
-  for (const f of visible) {
-    if (query && !f.name.toLowerCase().includes(query)) continue; // 🔍 파일 이름 검색
-    if (gallery.hiddenCats[f.category] || !matchesFilters(f)) continue; // 카테고리 바 [편집]에서 끈 카테고리는 안 보임
-    if (!groups.has(f.category)) groups.set(f.category, []);
-    groups.get(f.category).push(f);
-  }
-  // 🔀 랜덤: 구역 안에서 섞인 순서대로 (새로 보이게 된 영상은 뒤로)
-  if (randomRank) for (const list of groups.values()) list.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
-  shown = [...groups.values()].flat();
+  const counts = tagCounts();
+  const filtered = visible.filter(f => (!query || f.name.toLowerCase().includes(query)) && matchesFilters(f));
+  shown = window.GalleryOrder.sortVideos(filtered, gallery, items);
+  if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
+  $('#bulkTag').hidden = !!currentView;
+  $('#directoryMemos').hidden = !currentView;
   renderBulk();
-  const sections = [...groups].map(([cat, list]) => ({ cat, count: list.filter(f => !isHidden(f)).length,
-    el: el('section', { className: 'cat' },
-      el('h2', { className: 'cat-title', textContent: `${cat} · ${list.filter(f => !isHidden(f)).length}개` }),
-      el('div', { className: 'cat-grid' }, ...list.map(videoCard))) }));
-  const loved = shown.filter(isLoved);
-  if (loved.length) sections.unshift({ cat: '즐겨찾기', count: loved.length,
-    el: el('section', { className: 'cat fav-cat' },
-      el('h2', { className: 'cat-title', textContent: `즐겨찾기 · ${loved.length}개` }),
-      el('div', { className: 'cat-grid' }, ...loved.map(videoCard))) });
-  $('#grid').replaceChildren(...sections.map(s => s.el));
-  if (query && !sections.length) setStatus(`"${query}" 이(가) 들어간 파일이 없어요.`);
-  else if (nf && !sections.length) setStatus('조건에 맞는 영상이 없어요.');
-  else if (query || $('#status').textContent === '조건에 맞는 영상이 없어요.') setStatus('');
-  renderCatbar(sections);
+  if (currentView) renderDirectory();
+  else $('#grid').replaceChildren(el('div', { className: 'cat-grid' }, ...shown.map(f => videoCard(f, counts))));
+  if (currentView) setStatus('');
+  else if (query && !shown.length) setStatus('검색어가 들어간 파일이 없어요.');
+  else if (nf && !shown.length) setStatus('조건에 맞는 영상이 없어요.');
+  else setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
+  renderCatbar();
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
 
-// ---------- 카테고리 바 (🔍 검색 + 카테고리로 바로 가기) ----------
-let query = '', searchOpen = false, catChips = [];
+// ---------- 검색 + 태그 유형 탐색 ----------
+let query = '', searchOpen = false, currentView = '', searchTimer = null;
+const directoryKinds = [['normal', '태그'], ['character', '캐릭터'], ['category', '카테고리']];
+const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
-// 표시하기로 한 카테고리 (☰ 메뉴의 카테고리 목록도 이것만)
-const shownCats = () => [...new Set(items.map(f => f.category))].filter(c => !gallery.hiddenCats[c]);
-let catEditing = false;
-
-function renderCatbar(sections) {
+function directoryTabs() {
+  return directoryKinds.map(([kind, label]) => {
+    const b = el('button', {
+      className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
+      onclick: () => { clearTimeout(searchTimer); currentView = currentView === kind ? '' : kind; renderGrid(); }
+    });
+    b.setAttribute('aria-pressed', String(currentView === kind));
+    return b;
+  });
+}
+function renderCatbar() {
   const bar = $('#catbar');
-  bar.hidden = !items.length;
-  if (searchOpen) return updateSticky(); // 검색 중엔 입력칸을 그대로 둠
-  if (catEditing) { // [편집]: 카테고리를 눌러 표시/숨김 (줄 그어진 건 숨김), [완료]로 끝
-    catChips = [];
-    bar.replaceChildren(el('div', { className: 'catscroll' }, ...[...new Set(items.map(f => f.category))].map(c => {
-      const b = el('button', { className: 'chip' + (gallery.hiddenCats[c] ? ' off' : ''), textContent: c });
-      b.onclick = () => {
-        if (gallery.hiddenCats[c]) delete gallery.hiddenCats[c]; else gallery.hiddenCats[c] = true;
-        pendingSaves.set('c:' + c, gallery.hiddenCats[c] || null);
-        flushSaves();
-        renderGrid();
-      };
-      return b;
-    })), el('button', { className: 'cat-edit primary', textContent: '완료', onclick: () => { catEditing = false; renderGrid(); } }));
+  bar.hidden = false;
+  if (searchOpen) {
+    const strip = bar.querySelector('.catscroll');
+    for (const b of strip.querySelectorAll('[aria-pressed]')) b.remove();
+    strip.append(...directoryTabs());
     return updateSticky();
   }
-  catChips = sections.map(s => ({ section: s.el,
-    chip: el('button', { className: 'chip', textContent: `${s.cat} ${s.count}`, onclick: () => s.el.scrollIntoView({ block: 'start' }) }) }));
   bar.replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }), ...catChips.map(c => c.chip)),
-    el('button', { className: 'cat-edit', textContent: '편집', title: '표시할 카테고리 고르기',
-      onclick: () => { catEditing = true; renderGrid(); } }));
+    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }),
+    ...directoryTabs()));
   updateSticky();
-  markActiveChip();
+}
+function renderDirectory() {
+  const editing = document.body.classList.contains('editing'), counts = tagCounts();
+  const tags = [...counts.keys()].filter(t => tagKind(t) === currentView).sort(window.GalleryOrder.compareText);
+  $('#grid').replaceChildren(el('div', { className: 'pills tag-directory' }, ...tags.map(t => pill(t, counts.get(t), {
+    onclick: () => {
+      clearTimeout(searchTimer);
+      currentView = '';
+      query = '';
+      searchOpen = false;
+      filters = { ...EMPTY_FILTERS(), tags: [t] };
+      menuDraft = null;
+      renderGrid();
+      if (menu.open) renderMenu();
+      scrollTo(0, 0);
+    },
+    onStar: editing ? () => { toggleFav(t); renderGrid(); } : null,
+    onRename: editing ? renderGrid : null,
+    onDelete: editing ? () => deleteTag(t) : null, confirm: true
+  }))));
+  $('#directoryMemos').replaceChildren(...directoryKinds.filter(([kind]) => kind !== currentView).map(([kind, label]) => {
+    const ta = el('textarea', { placeholder: '이 목록의 기존 태그 입력 → ' + label + '(으)로 이동' });
+    const done = el('button', { className: 'primary done', textContent: '전송' });
+    done.onclick = () => {
+      const moving = parseTags(ta.value).filter(t => counts.has(t) && tagKind(t) === currentView);
+      if (!moving.length) return;
+      for (const t of moving) setTagKind(t, kind);
+      renderGrid();
+      flushSaves();
+    };
+    memoKeys(ta, () => done.click());
+    return el('div', { className: 'm-sec' }, el('b', { textContent: label + '(으)로 이동' }), el('div', { className: 'memo' }, ta, done));
+  }));
 }
 
 function openSearch() {
+  clearTimeout(searchTimer);
+  currentView = '';
+  renderGrid();
   searchOpen = true;
   const input = el('input', { className: 'search', type: 'search', placeholder: '파일 이름 검색', value: query, enterKeyHint: 'search' });
-  let timer = null;
   input.oninput = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
       query = input.value.trim().toLowerCase();
       renderGrid();
       // 결과가 바로 보이게 목록 맨 위로
@@ -1220,11 +1275,12 @@ function openSearch() {
   };
   input.onkeydown = e => { if (e.key === 'Escape') closeSearch(); };
   $('#catbar').replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', onclick: closeSearch }), input));
+    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', onclick: closeSearch }), input, ...directoryTabs()));
   input.focus();
 }
 
 function closeSearch() {
+  clearTimeout(searchTimer);
   searchOpen = false;
   query = '';
   setStatus('');
@@ -1236,22 +1292,7 @@ function stickyHeight() { return $('#catbar').hidden ? 0 : $('#catbar').offsetHe
 function updateSticky() { document.documentElement.style.setProperty('--sticky-h', stickyHeight() + 'px'); }
 addEventListener('resize', updateSticky);
 
-// 지금 보고 있는 카테고리를 바에서 표시하고, 바 밖으로 나가 있으면 옆으로 밀어서 보이게
-function markActiveChip() {
-  if (searchOpen || !catChips.length) return;
-  const line = stickyHeight() + 20;
-  let cur = 0;
-  catChips.forEach((c, i) => { if (c.section.getBoundingClientRect().top <= line) cur = i; });
-  catChips.forEach((c, i) => c.chip.classList.toggle('active', i === cur));
-  const strip = $('#catbar .catscroll'), chip = catChips[cur].chip;
-  if (strip && (chip.offsetLeft < strip.scrollLeft || chip.offsetLeft + chip.offsetWidth > strip.scrollLeft + strip.clientWidth)) {
-    strip.scrollLeft = chip.offsetLeft - 16;
-  }
-}
-let chipRaf = 0;
-addEventListener('scroll', () => { cancelAnimationFrame(chipRaf); chipRaf = requestAnimationFrame(markActiveChip); }, { passive: true });
-
-function videoCard(f) {
+function videoCard(f, counts = tagCounts()) {
   const custom = gallery.videos[f.id];
   const thumb = el('div', { className: 'thumb' });
   const src = custom ? custom.thumb : (f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s480') : '');
@@ -1283,10 +1324,11 @@ function videoCard(f) {
   };
   const card = el('button', { className: 'card', onclick: onCard },
     thumb, nameEl,
-    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...tagsOf(f).map(t => el('span', { textContent: t }))) : null, // PC: 이 영상의 태그
+    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { textContent: t }))) : null, // PC: 이 영상의 태그
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
+  if (gallery.marks[f.id]) card.classList.add('mark-' + gallery.marks[f.id]);
   if (isLoved(f)) { card.classList.add('loved'); thumb.append(heartSvg(true, 'love-badge')); }
   return card;
 }
@@ -1778,7 +1820,7 @@ function tagBox(f) {
   const render = () => {
     const counts = tagCounts();
     const row = tagsOf(f).length ? el('div', { className: 'pills' },
-      ...tagsOf(f).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); render(); } : null,
+      ...sortedTags(f, counts).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); render(); } : null,
         onRename: editing() ? render : null,
         onDelete: editing() ? () => { setTags(f, tagsOf(f).filter(x => x !== t)); render(); } : null })),
       el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
@@ -2548,6 +2590,7 @@ async function start() {
   $('#authBtn').hidden = false;
   $('#editBtn').hidden = false;
   renderEditBtn();
+  renderCatbar();
   setStatus('불러오는 중…');
   try {
     // 목록과 gallery.json 을 동시에 받음 (전에는 gallery.json 을 다 받은 뒤에야 목록을 시작)
