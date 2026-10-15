@@ -708,7 +708,7 @@ function tagCounts() {
     b[1] - a[1] || window.GalleryOrder.compareText(a[0], b[0])));
 }
 function sortedTags(f, counts = tagCounts()) {
-  const kindOrder = { character: 0, category: 1, genre: 2, normal: 3 };
+  const kindOrder = { category: 0, genre: 1, character: 2, normal: 3 };
   return [...tagsOf(f)].sort((a, b) => (kindOrder[tagKind(a)] ?? 3) - (kindOrder[tagKind(b)] ?? 3)
     || (counts.get(b) || 0) - (counts.get(a) || 0) || window.GalleryOrder.compareText(a, b));
 }

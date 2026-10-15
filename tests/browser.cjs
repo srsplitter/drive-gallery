@@ -138,7 +138,7 @@ const root = path.resolve(__dirname, '..');
       currentView='';filters=EMPTY_FILTERS();query='';renderGrid();
       return [...document.querySelector('.card[data-id="a"] .card-tags').children].map(n=>n.textContent);
     });
-    assert.deepEqual(chipOrder,['루이지','마리오','게임','모험','일반']);
+    assert.deepEqual(chipOrder,['게임','모험','루이지','마리오','일반']);
     await page.locator('#catbar').getByRole('button',{name:'장르',exact:true}).click();
     assert.equal(await page.locator('#grid .pill').count(),1);
     await page.locator('#grid .pill').filter({hasText:'모험'}).click();
