@@ -1400,85 +1400,93 @@ async function renameVideo(f, name) {
 }
 
 // ---------- 영상 창의 태그 칸 ----------
-// 태그가 없으면 메모 칸(쉼표로 구분해 한 번에 적고 [작성 완료]) → 알약으로 정리.
-// 알약 끝 (+) = 하나 추가(다른 영상에 붙은 태그를 많은 순으로 추천), (수정) = 전체를 다시 메모 칸으로.
-// 수정 ON: 알약의 ☆ 를 정확히 누르면 즐겨찾기(★) 켜고 끄기, 연필 = 이름 바꾸기.
-// 그 아래에 지금까지 만든 태그 전부(이 영상에 없는 것, 많은 순) — 누르면 이 영상에 붙음.
+// 위: 이 영상의 알약들 (+ = 하나 추가(다른 영상 태그를 많은 순으로 추천), 수정 = 전체를 메모 칸에 펼쳐 고치기)
+// 아래: 늘 열려 있는 메모 칸. 쉼표(띄어쓰기도 쉼표로 바뀜)로 적고 Enter·[작성 완료] → 알약으로 위에 붙고 칸은 비워짐.
+// 수정 ON: 알약의 ☆ 를 정확히 누르면 즐겨찾기(★), 연필 = 이름 바꾸기. 맨 아래 지금까지 만든 태그 전부(이 영상에 없는 것, 많은 순) — 누르면 이 영상에 붙음.
 function tagBox(f) {
   const box = el('div', { className: 'tag-box' });
   const editing = () => document.body.classList.contains('editing');
-  // 수정 ON 에서 칸 아래에 붙는 "모든 태그" 줄. pick(t) = 그 태그를 고름
-  const allTags = (pick, skip = tagsOf(f)) => {
+  let editAll = false; // [수정]으로 전체 태그를 메모 칸에 펼친 상태면 [작성 완료] 가 통째로 바꿈
+  const ta = el('textarea', { placeholder: '태그를 쉼표로 구분해 적고 Enter (예: 4k, 게임, 이미지)' });
+  const done = el('button', { className: 'primary done', textContent: '작성 완료' });
+  const memo = el('div', { className: 'memo' }, ta, done);
+  done.onclick = () => {
+    const typed = parseTags(ta.value);
+    if (editAll) setTags(f, typed);
+    else if (typed.length) setTags(f, [...tagsOf(f), ...typed]);
+    editAll = false;
+    ta.value = '';
+    render();
+    ta.focus();
+  };
+  // Enter = 작성 완료. 한글 입력 중(조합 중)에 누른 Enter 는 글자가 확정된 뒤 처리
+  let enterPending = false;
+  ta.onkeydown = e => {
+    if (e.key === 'Escape' && editAll) { e.preventDefault(); e.stopPropagation(); editAll = false; ta.value = ''; return; }
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    if (e.isComposing || e.keyCode === 229) enterPending = true; else done.click();
+  };
+  ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(() => done.click()); } });
+  // 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
+  ta.addEventListener('input', e => {
+    if (e.isComposing) return;
+    const v = ta.value, at = ta.selectionStart;
+    const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
+    const next = fix(v);
+    if (next === v) return;
+    const caret = fix(v.slice(0, at)).length;
+    ta.value = next;
+    ta.setSelectionRange(caret, caret);
+  });
+
+  // 수정 ON: "모든 태그" 줄. 누르면 이 영상에 바로 붙음 (전체 고치는 중이면 메모 칸 끝에 이어 적음)
+  const allTags = () => {
     if (!editing()) return null;
-    const counts = tagCounts(), list = [...counts.keys()].filter(t => !skip.includes(t));
+    const counts = tagCounts(), have = editAll ? parseTags(ta.value) : tagsOf(f);
+    const list = [...counts.keys()].filter(t => !have.includes(t));
     if (!list.length) return null;
+    const pick = t => {
+      if (editAll) ta.value = [...parseTags(ta.value), t].join(', ');
+      else setTags(f, [...tagsOf(f), t]);
+      render();
+    };
     return el('div', { className: 'm-sec all-tags' }, el('b', { textContent: '모든 태그' }),
       el('div', { className: 'pills' }, ...list.map(t => pill(t, counts.get(t), { onclick: () => pick(t),
-        onStar: () => { toggleFav(t); refresh(); } }))));
+        onStar: () => { toggleFav(t); render(); } }))));
   };
-  let refresh = () => {};
-  const memo = () => {
-    const ta = el('textarea', { value: tagsOf(f).join(', '), placeholder: '태그를 쉼표로 구분해 적어 주세요 (예: 4k, 게임, 이미지)' });
-    const done = el('button', { className: 'primary done', textContent: '작성 완료',
-      onclick: () => { setTags(f, parseTags(ta.value)); pills(); } });
-    // Enter = 작성 완료. 한글 입력 중(조합 중)에 누른 Enter 는 글자가 확정된 뒤 처리
-    let enterPending = false;
-    ta.onkeydown = e => {
-      if (e.key !== 'Enter' || e.shiftKey) return;
-      e.preventDefault();
-      if (e.isComposing || e.keyCode === 229) enterPending = true; else done.click();
-    };
-    ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(() => done.click()); } });
-    // 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
-    ta.addEventListener('input', e => {
-      if (e.isComposing) return;
-      const v = ta.value, at = ta.selectionStart;
-      const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
-      const next = fix(v);
-      if (next === v) return;
-      const caret = fix(v.slice(0, at)).length;
-      ta.value = next;
-      ta.setSelectionRange(caret, caret);
-    });
-    // 메모 칸에서는 고른 태그를 칸 끝에 이어 적음(아직 저장 전)
-    const add = t => { const cur = parseTags(ta.value); if (!cur.includes(t)) ta.value = [...cur, t].join(', '); draw(); };
-    const draw = () => box.replaceChildren(el('div', { className: 'memo' }, ta, done), ...[allTags(add, parseTags(ta.value))].filter(Boolean));
-    refresh = draw;
-    draw();
-    return ta;
-  };
-  const pills = () => {
-    if (!tagsOf(f).length) return memo();
-    refresh = pills;
+
+  const render = () => {
     const counts = tagCounts();
-    box.replaceChildren(el('div', { className: 'pills' },
-      ...tagsOf(f).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); pills(); } : null,
-        onRename: editing() ? pills : null })),
+    const row = tagsOf(f).length ? el('div', { className: 'pills' },
+      ...tagsOf(f).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); render(); } : null,
+        onRename: editing() ? render : null })),
       el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
-      el('button', { className: 'pill ghost', textContent: '수정', onclick: () => memo().focus() })),
-      ...[allTags(t => { setTags(f, [...tagsOf(f), t]); pills(); })].filter(Boolean));
+      el('button', { className: 'pill ghost', textContent: '수정', title: '태그 전체를 메모 칸에서 고치기',
+        onclick: () => { editAll = true; ta.value = tagsOf(f).join(', '); render(); ta.focus(); } })) : null;
+    box.replaceChildren(...[row, memo, allTags()].filter(Boolean));
   };
   const adder = () => {
     const counts = tagCounts();
     const input = el('input', { className: 'm-in', placeholder: '추가할 태그', enterKeyHint: 'done' });
     const sugg = el('div', { className: 'pills' });
-    const add = t => { t = t.trim(); if (t) setTags(f, [...tagsOf(f), t]); pills(); };
+    const add = t => { t = t.trim(); if (t) setTags(f, [...tagsOf(f), t]); render(); };
     const draw = () => { // 이 영상엔 없는, 다른 영상의 태그를 많은 순으로
       const q = input.value.trim().toLowerCase();
       sugg.replaceChildren(...[...counts.keys()].filter(t => !tagsOf(f).includes(t) && (!q || t.toLowerCase().includes(q)))
         .slice(0, 20).map(t => pill(t, counts.get(t), { onclick: () => add(t) })));
     };
     input.oninput = draw;
-    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(input.value); } else if (e.key === 'Escape') { e.preventDefault(); pills(); } };
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); add(input.value); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); render(); } };
     box.replaceChildren(el('div', { className: 'tag-add' },
       el('div', { className: 'row' }, el('div', { style: 'flex:1' }, input),
         el('button', { className: 'primary', textContent: '추가', onclick: () => add(input.value) }),
-        el('button', { textContent: '취소', onclick: pills })),
+        el('button', { textContent: '취소', onclick: render })),
       sugg));
     draw();
     input.focus();
   };
-  pills();
+  render();
   return box;
 }
 
