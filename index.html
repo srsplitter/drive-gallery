@@ -44,6 +44,8 @@
   .thumb { overflow: hidden; }
   body:not(.editing) .edit-only, body:not(.has-ext) .ext-only, body.has-ext .no-ext-only { display: none !important; }
   .edit-wrap { position: relative; }
+  #saveState { font-size: 13px; color: var(--dim); white-space: nowrap; }
+  #saveState.error { color: var(--danger); white-space: normal; max-width: 280px; }
   #editNote { position: absolute; right: 0; top: calc(100% + 8px); width: min(300px, 80vw); display: grid; gap: 8px;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
   #editNote[hidden] { display: none; }
@@ -80,6 +82,7 @@
 <header>
   <h1>🎬 영상 갤러리</h1>
   <nav id="crumbs"></nav>
+  <span id="saveState"></span>
   <span class="edit-wrap"><button id="editBtn" hidden></button><div id="editNote" hidden></div></span>
   <button id="authBtn" hidden></button>
 </header>
@@ -220,31 +223,81 @@ async function api(url, opts = {}) {
 
 // ---------- 썸네일 저장소 (내 드라이브의 숨김 앱 폴더, gallery.json) ----------
 let gallery = { videos: {} }, galleryFileId = null;
+// 아직 드라이브에 못 쓴 변경 (영상 ID → 새 항목, null = 삭제). 화면에는 이미 반영돼 있다.
+const pendingSaves = new Map();
+let saving = false, saveError = '', retryTimer = null;
 
-async function loadGallery() {
+async function readRemote() {
   const p = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${GALLERY_NAME}'`, fields: 'files(id)' });
   const { files } = await (await api(`${DRIVE}/files?${p}`)).json();
-  if (!files.length) { galleryFileId = null; gallery = { videos: {} }; return; }
-  galleryFileId = files[0].id;
-  gallery = await (await api(`${DRIVE}/files/${galleryFileId}?alt=media`)).json();
-  gallery.videos = gallery.videos || {};
+  if (!files.length) return { fileId: null, data: { videos: {} } };
+  const data = await (await api(`${DRIVE}/files/${files[0].id}?alt=media`)).json();
+  data.videos = data.videos || {};
+  return { fileId: files[0].id, data };
 }
 
-// entry 가 없으면 해당 영상의 지정 썸네일 삭제
-async function saveEntry(fileId, entry) {
-  await loadGallery(); // 다른 기기에서 바뀐 내용을 덮어쓰지 않도록 최신본 위에 반영
-  if (entry) gallery.videos[fileId] = entry; else delete gallery.videos[fileId];
-  const body = JSON.stringify(gallery);
-  if (galleryFileId) {
-    await api(`${UPLOAD}/files/${galleryFileId}?uploadType=media`,
-      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
-  } else {
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify({ name: GALLERY_NAME, parents: ['appDataFolder'] })], { type: 'application/json' }));
-    form.append('file', new Blob([body], { type: 'application/json' }));
-    galleryFileId = (await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', body: form })).json()).id;
-  }
+function applyChanges(data, changes) {
+  for (const [id, entry] of changes) { if (entry) data.videos[id] = entry; else delete data.videos[id]; }
 }
+
+async function loadGallery() {
+  ({ fileId: galleryFileId, data: gallery } = await readRemote());
+  applyChanges(gallery, pendingSaves); // 아직 저장 중인 변경은 화면에 그대로 유지
+}
+
+// 썸네일 변경(entry 가 null 이면 지정 해제): 화면엔 바로 반영하고, 드라이브 저장은 뒤에서 순서대로 처리
+function saveEntry(fileId, entry) {
+  if (entry) gallery.videos[fileId] = entry; else delete gallery.videos[fileId];
+  pendingSaves.set(fileId, entry);
+  renderGrid();
+  flushSaves();
+}
+
+// 대기 중인 변경을 한 번에 모아 저장. 저장 중에 새로 들어온 변경은 끝난 뒤 이어서 저장.
+async function flushSaves() {
+  if (saving || !pendingSaves.size) return renderSaveState();
+  saving = true;
+  clearTimeout(retryTimer);
+  renderSaveState();
+  const batch = new Map(pendingSaves);
+  try {
+    const { fileId, data } = await readRemote(); // 다른 기기에서 바뀐 내용을 덮어쓰지 않도록 최신본 위에 반영
+    applyChanges(data, batch);
+    const body = JSON.stringify(data);
+    if (fileId) {
+      await api(`${UPLOAD}/files/${fileId}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body });
+      galleryFileId = fileId;
+    } else {
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify({ name: GALLERY_NAME, parents: ['appDataFolder'] })], { type: 'application/json' }));
+      form.append('file', new Blob([body], { type: 'application/json' }));
+      galleryFileId = (await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', body: form })).json()).id;
+    }
+    // 저장하는 사이 같은 영상이 또 바뀌지 않았으면 대기열에서 뺌
+    for (const [id, entry] of batch) if (pendingSaves.get(id) === entry) pendingSaves.delete(id);
+    saveError = '';
+  } catch (e) {
+    if (e instanceof AuthError) {
+      saveError = '로그인이 만료돼 저장을 멈췄어요. 다시 로그인하면 이어서 저장해요.';
+    } else {
+      saveError = '저장하지 못했어요. 잠시 뒤 다시 시도해요.';
+      retryTimer = setTimeout(flushSaves, 5000);
+    }
+  } finally {
+    saving = false;
+  }
+  if (!saveError && pendingSaves.size) return flushSaves();
+  renderSaveState();
+}
+
+function renderSaveState() {
+  const n = pendingSaves.size, s = $('#saveState');
+  s.textContent = saveError ? `⚠️ ${saveError}${n ? ` (${n}개 남음)` : ''}` : n ? `💾 저장 중… ${n}개` : '';
+  s.className = saveError ? 'error' : '';
+}
+
+// 저장이 남아 있으면 탭을 닫기 전에 한 번 확인
+window.addEventListener('beforeunload', e => { if (pendingSaves.size) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- 폴더 탐색 ----------
 let path = [{ id: 'root', name: '내 드라이브' }];
@@ -388,10 +441,13 @@ function openViewer(f) {
     if (!dragging) seekBar.value = r.time;
     playerState.textContent = (r.paused ? '⏸ ' : '▶ ') + fmtTenth(r.time) + (r.duration ? ' / ' + fmtTime(r.duration) : '');
   };
-  const pc = (label, action, delta) => el('button', { textContent: label,
-    onclick: () => extCall('player', { action, delta })
-      .then(r => { showState(r); $('#preview').replaceChildren(); })
-      .catch(e => showPreviewMessage(e.message)) });
+  const send = (action, delta) => extCall('player', { action, delta })
+    .then(r => { showState(r); $('#preview').replaceChildren(); })
+    .catch(e => showPreviewMessage(e.message));
+  // ⏯ 는 한 번씩, ±이동 버튼은 꾹 누르면 연속으로
+  const pc = (label, action, delta) => action === 'seek'
+    ? holdRepeat(el('button', { textContent: label }), () => send(action, delta))
+    : el('button', { textContent: label, onclick: () => send(action, delta) });
   const seekTo = () => extCall('player', { action: 'seekTo', delta: +seekBar.value }).then(showState).catch(() => {});
   seekBar.oninput = () => {
     dragging = true;
@@ -633,17 +689,12 @@ function askThumb(f, canvas, btn) {
   btn.style.minWidth = btn.offsetWidth + 'px'; // 폭을 그대로 둬서 누른 자리에 [바꾸기]가 오게
   Object.assign(btn, { textContent: '✅ 바꾸기', disabled: false });
   btn.classList.add('primary');
-  btn.onclick = async () => {
-    btn.disabled = cancel.disabled = true;
-    btn.textContent = '저장 중…';
-    try {
-      const r = cropper.rect();
-      const out = el('canvas', { width: r.w, height: r.h });
-      out.getContext('2d').drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
-      await saveEntry(f.id, { t: null, thumb: capture(out, r.w, r.h), at: new Date().toISOString() });
-      renderGrid();
-      viewer.close();
-    } catch (e) { viewer.close(); handleError(e); }
+  btn.onclick = () => {
+    const r = cropper.rect();
+    const out = el('canvas', { width: r.w, height: r.h });
+    out.getContext('2d').drawImage(canvas, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+    saveEntry(f.id, { t: null, thumb: capture(out, r.w, r.h), at: new Date().toISOString() });
+    viewer.close(); // 저장은 뒤에서 — 바로 다음 영상으로
   };
   btn.after(cancel);
 }
@@ -658,8 +709,9 @@ document.addEventListener('paste', e => {
   previewImage(viewerFile, item.getAsFile(), captureBtn.isConnected ? captureBtn : imageBtn);
 });
 
-async function resetThumb(f) {
-  try { await saveEntry(f.id, null); renderGrid(); viewer.close(); } catch (e) { viewer.close(); handleError(e); }
+function resetThumb(f) {
+  saveEntry(f.id, null);
+  viewer.close();
 }
 
 // ---------- 장면 지정 ----------
@@ -822,6 +874,26 @@ function drawFrame(canvas, frame, rotation) {
   g.drawImage(frame, -w / 2, -h / 2, w, h);
 }
 
+// 꾹 누르면 반복: 누를 때 한 번 → 0.4초 뒤부터 0.12초마다. 앞 요청이 끝나기 전엔 다음을 보내지 않음
+function holdRepeat(btn, fn) {
+  let timer = null, busy = false;
+  const fire = () => {
+    if (busy) return;
+    busy = true;
+    Promise.resolve(fn()).finally(() => { busy = false; });
+  };
+  const stop = () => { clearTimeout(timer); timer = null; };
+  btn.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    stop();
+    fire();
+    timer = setTimeout(function repeat() { fire(); timer = setTimeout(repeat, 120); }, 400);
+  });
+  for (const t of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(t, stop);
+  btn.addEventListener('click', e => { if (e.detail === 0) fire(); }); // 키보드(Enter/Space)로 누른 경우
+  return btn;
+}
+
 function fmtTenth(t) { const d = Math.round(t * 10); return fmtTime(Math.floor(d / 10)) + '.' + (d % 10); }
 function parseTime(str) {
   const v = str.trim().split(':').reduce((acc, part) => acc * 60 + parseFloat(part), 0);
@@ -869,14 +941,9 @@ function showFramePicker(f, src) {
   slider.oninput = () => setTime(+slider.value);
   timeInput.onchange = () => { const t = parseTime(timeInput.value); if (t !== null) setTime(t, true); };
   const step = d => () => setTime(cur + d, true);
-  saveBtn.onclick = async () => {
-    saveBtn.disabled = true;
-    msg.textContent = '저장 중…';
-    try {
-      await saveEntry(f.id, { t: Math.round(shownT * 10) / 10, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
-      renderGrid();
-      viewer.close();
-    } catch (e) { viewer.close(); handleError(e); }
+  saveBtn.onclick = () => {
+    saveEntry(f.id, { t: Math.round(shownT * 10) / 10, thumb: capture(canvas, canvas.width, canvas.height), at: new Date().toISOString() });
+    viewer.close();
   };
   $('#vBody').replaceChildren(canvas, slider,
     el('div', { className: 'row' },
@@ -907,17 +974,9 @@ function showPicker(f, url) {
     if (prev && typeof prev.t === 'number') video.currentTime = prev.t;
   });
   video.addEventListener('error', () => { closeViewerResources(); showUnsupported(f); });
-  saveBtn.onclick = async () => {
-    saveBtn.disabled = true;
-    msg.textContent = '저장 중…';
-    try {
-      await saveEntry(f.id, { t: Math.round(video.currentTime * 10) / 10, thumb: capture(video, video.videoWidth, video.videoHeight), at: new Date().toISOString() });
-      renderGrid();
-      viewer.close();
-    } catch (e) {
-      viewer.close();
-      handleError(e);
-    }
+  saveBtn.onclick = () => {
+    saveEntry(f.id, { t: Math.round(video.currentTime * 10) / 10, thumb: capture(video, video.videoWidth, video.videoHeight), at: new Date().toISOString() });
+    viewer.close();
   };
   $('#vBody').replaceChildren(video,
     el('div', { className: 'row' },
@@ -971,6 +1030,7 @@ async function start() {
   setStatus('불러오는 중…');
   try {
     await loadGallery();
+    flushSaves(); // 로그인이 만료돼 멈췄던 저장이 있으면 이어서
     await openFolder();
   } catch (e) { handleError(e); }
 }
