@@ -107,6 +107,8 @@ function framePlayer(action, delta) {
   } else if (action === 'seek' || action === 'seekTo') { // seek: 상대 이동, seekTo: 그 시각으로
     v.pause();
     const end = Number.isFinite(v.duration) ? v.duration : Infinity;
+    window.__dgOwnSeek = true; // 시간표 클릭 1초 보정(autopause.js)에서 제외
+    setTimeout(() => { window.__dgOwnSeek = false; }, 1000);
     v.currentTime = Math.min(Math.max(0, action === 'seek' ? v.currentTime + delta : delta), end);
   } // action === 'state': 상태만 알려줌
   return { where, videos: found.length, acted: true, paused: v.paused, time: v.currentTime,

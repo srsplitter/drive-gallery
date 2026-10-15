@@ -20,4 +20,21 @@ if (window !== window.top && ancestors && ancestors.length && ancestors[ancestor
     setTimeout(() => { if (on && !window.__dgUserPlay) v.pause(); }, 300);
   }, true);
   document.addEventListener('pause', () => { window.__dgUserPlay = false; }, true);
+
+  // 드라이브 시간표의 미리보기는 실제 이동 위치보다 1초 앞 장면이라, 시간표를 클릭(끌어 놓기)해 이동하면 1초 되돌린다.
+  // 갤러리의 시간 조절바·±버튼(relay.js framePlayer 가 __dgOwnSeek 표시)과 키보드 이동은 그대로 둔다.
+  let lastPointer = 0;
+  for (const t of ['pointerdown', 'pointerup', 'click']) {
+    document.addEventListener(t, () => { lastPointer = Date.now(); }, true);
+  }
+  document.addEventListener('seeking', (e) => {
+    const v = e.target;
+    if (!(v instanceof HTMLMediaElement)) return;
+    if (window.__dgOwnSeek) { window.__dgOwnSeek = false; return; }
+    if (!on || Date.now() - lastPointer > 1500 || v.currentTime < 1) return;
+    lastPointer = 0; // 클릭 한 번에 한 번만
+    window.__dgOwnSeek = true; // 아래 되돌리기가 다시 여기로 들어와도 무시
+    setTimeout(() => { window.__dgOwnSeek = false; }, 1000);
+    v.currentTime -= 1;
+  }, true);
 }
