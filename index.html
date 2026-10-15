@@ -1421,6 +1421,25 @@ function tagBox(f) {
     const ta = el('textarea', { value: tagsOf(f).join(', '), placeholder: '태그를 쉼표로 구분해 적어 주세요 (예: 4k, 게임, 이미지)' });
     const done = el('button', { className: 'primary done', textContent: '작성 완료',
       onclick: () => { setTags(f, parseTags(ta.value)); pills(); } });
+    // Enter = 작성 완료. 한글 입력 중(조합 중)에 누른 Enter 는 글자가 확정된 뒤 처리
+    let enterPending = false;
+    ta.onkeydown = e => {
+      if (e.key !== 'Enter' || e.shiftKey) return;
+      e.preventDefault();
+      if (e.isComposing || e.keyCode === 229) enterPending = true; else done.click();
+    };
+    ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(() => done.click()); } });
+    // 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
+    ta.addEventListener('input', e => {
+      if (e.isComposing) return;
+      const v = ta.value, at = ta.selectionStart;
+      const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
+      const next = fix(v);
+      if (next === v) return;
+      const caret = fix(v.slice(0, at)).length;
+      ta.value = next;
+      ta.setSelectionRange(caret, caret);
+    });
     // 메모 칸에서는 고른 태그를 칸 끝에 이어 적음(아직 저장 전)
     const add = t => { const cur = parseTags(ta.value); if (!cur.includes(t)) ta.value = [...cur, t].join(', '); draw(); };
     const draw = () => box.replaceChildren(el('div', { className: 'memo' }, ta, done), ...[allTags(add, parseTags(ta.value))].filter(Boolean));
