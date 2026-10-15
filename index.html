@@ -13,15 +13,18 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.45 -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  /* 페이지 전체가 화면보다 넓어져 옆으로 밀리지 않게 (clip 은 위쪽 고정 바를 깨지 않음) */
+  body { overflow-x: clip; }
   button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
     padding: 8px 14px; border-radius: 10px; cursor: pointer; text-decoration: none; display: inline-block; }
   button:hover, .btn:hover { border-color: var(--dim); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
   button:disabled { opacity: .5; cursor: default; }
-  header { position: sticky; top: 0; z-index: 5; background: rgba(17,19,23,.92); backdrop-filter: blur(8px);
+  /* 위쪽 헤더(제목·수정·로그아웃)는 따라오지 않고 페이지 맨 위에 그대로 — 따라오는 건 카테고리 바만 */
+  header { position: relative; z-index: 5; background: rgba(17,19,23,.92);
     border-bottom: 1px solid var(--line); padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
     display: flex; gap: 12px; align-items: center; }
-  header h1 { font-size: 17px; margin: 0; white-space: nowrap; }
+  header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   #crumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; white-space: nowrap; color: var(--dim); }
   #crumbs a { color: var(--dim); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
   #crumbs a:last-child { color: var(--text); font-weight: 600; }
@@ -39,20 +42,22 @@
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
-  /* 카테고리 바: PC 는 헤더 바로 아래에 붙어 따라오고, 모바일은 헤더가 위에 남고 이 바만 화면 맨 위에 붙음 */
-  #catbar { position: sticky; top: var(--hdr-h, 0px); z-index: 4; display: flex; gap: 6px; align-items: center;
-    overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: none;
-    padding: 8px 16px; background: rgba(17,19,23,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
-  #catbar::-webkit-scrollbar { display: none; }
+  /* 카테고리 바: 화면 맨 위에 붙어 따라옴(모든 기기). 바깥(#catbar)은 고정만, 안쪽(.catscroll)은 가로 스크롤만 —
+     둘을 한 요소에 같이 두면 일부 폰 브라우저에서 고정이 풀리거나 페이지 전체가 옆으로 밀림 */
+  #catbar { position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
+    background: rgba(17,19,23,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
   #catbar[hidden] { display: none; }
+  .catscroll { display: flex; gap: 6px; align-items: center; padding: 8px 16px; max-width: 100%; box-sizing: border-box;
+    overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: none; }
+  .catscroll::-webkit-scrollbar { display: none; }
   .chip { flex: none; padding: 6px 12px; border-radius: 999px; font-size: 14px; white-space: nowrap; }
   .chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-  #catbar .search { flex: 1; min-width: 120px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--accent);
+  .catscroll .search { flex: 1; min-width: 120px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--accent);
     background: var(--bg); color: var(--text); font: inherit; }
   .cat { scroll-margin-top: calc(var(--sticky-h, 0px) + 8px); }
   header button { white-space: nowrap; }
   @media (max-width: 640px) {
-    header { position: static; flex-wrap: wrap; gap: 8px; }
+    header { flex-wrap: wrap; gap: 8px; }
     header h1 { flex: 1; font-size: 16px; }
     header button { padding: 6px 10px; font-size: 13px; }
     #crumbs { order: 3; flex-basis: 100%; } /* "모든 영상 · N개"는 아랫줄로 */
@@ -517,7 +522,8 @@ function renderCatbar(sections) {
   if (searchOpen) return updateSticky(); // 검색 중엔 입력칸을 그대로 둠
   catChips = sections.map(s => ({ section: s.el,
     chip: el('button', { className: 'chip', textContent: `${s.cat} ${s.count}`, onclick: () => s.el.scrollIntoView({ block: 'start' }) }) }));
-  bar.replaceChildren(el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }), ...catChips.map(c => c.chip));
+  bar.replaceChildren(el('div', { className: 'catscroll' },
+    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }), ...catChips.map(c => c.chip)));
   updateSticky();
   markActiveChip();
 }
@@ -537,7 +543,8 @@ function openSearch() {
     }, 150);
   };
   input.onkeydown = e => { if (e.key === 'Escape') closeSearch(); };
-  $('#catbar').replaceChildren(el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', onclick: closeSearch }), input);
+  $('#catbar').replaceChildren(el('div', { className: 'catscroll' },
+    el('button', { className: 'chip', textContent: '✕', title: '검색 닫기', onclick: closeSearch }), input));
   input.focus();
 }
 
@@ -548,14 +555,9 @@ function closeSearch() {
   renderGrid();
 }
 
-// 화면 위에 붙어 있는 높이: PC = 헤더 + 카테고리 바, 모바일 = 카테고리 바만 (헤더는 위에 남고 따라오지 않음)
-const isMobile = () => matchMedia('(max-width: 640px)').matches;
-function stickyHeight() { return (isMobile() ? 0 : $('header').offsetHeight) + ($('#catbar').hidden ? 0 : $('#catbar').offsetHeight); }
-function updateSticky() {
-  const root = document.documentElement.style;
-  root.setProperty('--hdr-h', (isMobile() ? 0 : $('header').offsetHeight) + 'px');
-  root.setProperty('--sticky-h', stickyHeight() + 'px');
-}
+// 화면 위에 붙어 있는 높이 = 카테고리 바 (헤더는 페이지 맨 위에 남고 따라오지 않음)
+function stickyHeight() { return $('#catbar').hidden ? 0 : $('#catbar').offsetHeight; }
+function updateSticky() { document.documentElement.style.setProperty('--sticky-h', stickyHeight() + 'px'); }
 addEventListener('resize', updateSticky);
 
 // 지금 보고 있는 카테고리를 바에서 표시하고, 바 밖으로 나가 있으면 옆으로 밀어서 보이게
@@ -565,9 +567,9 @@ function markActiveChip() {
   let cur = 0;
   catChips.forEach((c, i) => { if (c.section.getBoundingClientRect().top <= line) cur = i; });
   catChips.forEach((c, i) => c.chip.classList.toggle('active', i === cur));
-  const bar = $('#catbar'), chip = catChips[cur].chip;
-  if (chip.offsetLeft < bar.scrollLeft || chip.offsetLeft + chip.offsetWidth > bar.scrollLeft + bar.clientWidth) {
-    bar.scrollLeft = chip.offsetLeft - 16;
+  const strip = $('#catbar .catscroll'), chip = catChips[cur].chip;
+  if (strip && (chip.offsetLeft < strip.scrollLeft || chip.offsetLeft + chip.offsetWidth > strip.scrollLeft + strip.clientWidth)) {
+    strip.scrollLeft = chip.offsetLeft - 16;
   }
 }
 let chipRaf = 0;
