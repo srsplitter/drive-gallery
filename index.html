@@ -118,6 +118,10 @@
   .memo textarea:focus { outline: none; border-color: var(--accent); }
   .memo .done { position: absolute; right: 8px; bottom: 10px; padding: 4px 12px; font-size: 13px; }
   .tag-add { display: grid; gap: 6px; }
+  .tag-box { display: grid; gap: 10px; }
+  .all-tags > b { font-size: 12px; color: var(--dim); font-weight: 600; }
+  body.editing .pill .star { cursor: pointer; padding: 2px 3px; margin: -2px -1px -2px -3px; border-radius: 6px; } /* 별만 따로 누르기 쉽게 */
+  body.editing .pill .star:hover { background: rgba(255,197,49,.15); }
   /* 길이: PC는 썸네일 위, 폰은 이름 아래 줄(구분선 + 오른쪽 정렬 + 흐린 색) */
   .dur-line { display: none; color: #6b717c; text-align: right; border-top: 1px solid var(--line); }
   .card .name.dur-line { padding-top: 4px; padding-bottom: 4px; }
@@ -1392,25 +1396,42 @@ async function renameVideo(f, name) {
 // ---------- 영상 창의 태그 칸 ----------
 // 태그가 없으면 메모 칸(쉼표로 구분해 한 번에 적고 [작성 완료]) → 알약으로 정리.
 // 알약 끝 (+) = 하나 추가(다른 영상에 붙은 태그를 많은 순으로 추천), (수정) = 전체를 다시 메모 칸으로.
-// 수정 ON 에서 알약을 누르면 즐겨찾기(★) 켜고 끄기.
+// 수정 ON: 알약의 ☆ 를 정확히 누르면 즐겨찾기(★) 켜고 끄기, 연필 = 이름 바꾸기.
+// 그 아래에 지금까지 만든 태그 전부(이 영상에 없는 것, 많은 순) — 누르면 이 영상에 붙음.
 function tagBox(f) {
   const box = el('div', { className: 'tag-box' });
+  const editing = () => document.body.classList.contains('editing');
+  // 수정 ON 에서 칸 아래에 붙는 "모든 태그" 줄. pick(t) = 그 태그를 고름
+  const allTags = (pick, skip = tagsOf(f)) => {
+    if (!editing()) return null;
+    const counts = tagCounts(), list = [...counts.keys()].filter(t => !skip.includes(t));
+    if (!list.length) return null;
+    return el('div', { className: 'm-sec all-tags' }, el('b', { textContent: '모든 태그' }),
+      el('div', { className: 'pills' }, ...list.map(t => pill(t, counts.get(t), { onclick: () => pick(t),
+        onStar: () => { toggleFav(t); refresh(); } }))));
+  };
+  let refresh = () => {};
   const memo = () => {
     const ta = el('textarea', { value: tagsOf(f).join(', '), placeholder: '태그를 쉼표로 구분해 적어 주세요 (예: 4k, 게임, 이미지)' });
     const done = el('button', { className: 'primary done', textContent: '작성 완료',
       onclick: () => { setTags(f, parseTags(ta.value)); pills(); } });
-    box.replaceChildren(el('div', { className: 'memo' }, ta, done));
+    // 메모 칸에서는 고른 태그를 칸 끝에 이어 적음(아직 저장 전)
+    const add = t => { const cur = parseTags(ta.value); if (!cur.includes(t)) ta.value = [...cur, t].join(', '); draw(); };
+    const draw = () => box.replaceChildren(el('div', { className: 'memo' }, ta, done), ...[allTags(add, parseTags(ta.value))].filter(Boolean));
+    refresh = draw;
+    draw();
     return ta;
   };
   const pills = () => {
     if (!tagsOf(f).length) return memo();
+    refresh = pills;
     const counts = tagCounts();
-    const editing = document.body.classList.contains('editing');
     box.replaceChildren(el('div', { className: 'pills' },
-      ...tagsOf(f).map(t => pill(t, counts.get(t), { onclick: editing ? () => { toggleFav(t); pills(); } : null,
-        onRename: editing ? pills : null })),
+      ...tagsOf(f).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); pills(); } : null,
+        onRename: editing() ? pills : null })),
       el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
-      el('button', { className: 'pill ghost', textContent: '수정', onclick: () => memo().focus() })));
+      el('button', { className: 'pill ghost', textContent: '수정', onclick: () => memo().focus() })),
+      ...[allTags(t => { setTags(f, [...tagsOf(f), t]); pills(); })].filter(Boolean));
   };
   const adder = () => {
     const counts = tagCounts();
