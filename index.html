@@ -42,6 +42,18 @@
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
+  /* 폰: 왼쪽 아래 원형 버튼으로 2단 → 3단 → 4단 → 2단 (목록이 보일 때만) */
+  #colsBtn { display: none; position: fixed; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20;
+    width: 52px; height: 52px; padding: 0; border-radius: 50%; font-size: 14px; font-weight: 700;
+    background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  @media (max-width: 520px), (pointer: coarse) { #colsBtn { display: block; } }
+  #catbar[hidden] ~ #colsBtn { display: none; }
+  body[data-cols] .cat-grid { grid-template-columns: repeat(var(--cols), 1fr); }
+  body[data-cols="3"] .cat-grid { gap: 8px; }
+  body[data-cols="4"] .cat-grid { gap: 6px; }
+  body[data-cols="4"] .name { font-size: 11px; padding: 5px 6px; }
+  body[data-cols="4"] .badge { font-size: 10px; padding: 0 4px; bottom: 4px; right: 4px; }
+  body[data-cols="4"] .badge.pin { left: 4px; }
   /* 카테고리 바: 화면 맨 위에 붙어 따라옴(모든 기기). 바깥(#catbar)은 고정만, 안쪽(.catscroll)은 가로 스크롤만 —
      둘을 한 요소에 같이 두면 일부 폰 브라우저에서 고정이 풀리거나 페이지 전체가 옆으로 밀림 */
   #catbar { position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
@@ -138,6 +150,7 @@
   <button id="authBtn" hidden></button>
 </header>
 <nav id="catbar" hidden></nav>
+<button id="colsBtn" aria-label="한 줄에 보이는 영상 수 바꾸기"></button>
 <main>
   <section id="setup" class="notice" hidden>
     <h2>처음 설정</h2>
@@ -429,6 +442,17 @@ window.addEventListener('beforeunload', e => { if (pendingSaves.size) { e.preven
 // 내가 올린 영상을 한 번에 모두 가져와, 들어 있는 드라이브 폴더 이름을 카테고리로 삼아 한 화면에 구역별로 보여줌.
 // 폴더 밖(내 드라이브 맨 위) 영상은 "내 드라이브" 구역. 같은 이름의 폴더는 한 카테고리로 합쳐짐.
 let items = []; // 화면 순서(카테고리 → 이름)대로 모든 영상
+
+// 왼쪽 아래 원형 버튼: 누를 때마다 한 줄에 2 → 3 → 4 → 2개 (이 기기에 기억)
+function setCols(n) {
+  document.body.dataset.cols = n;
+  document.body.style.setProperty('--cols', n);
+  $('#colsBtn').textContent = n + '단';
+  try { localStorage.setItem('cols', n); } catch {}
+}
+$('#colsBtn').onclick = () => { const n = +document.body.dataset.cols || 2; setCols(n >= 4 ? 2 : n + 1); };
+try { if (localStorage.getItem('cols')) setCols(+localStorage.getItem('cols')); } catch {}
+if (!document.body.dataset.cols) $('#colsBtn').textContent = '2단';
 
 async function listAllVideos() {
   const q = "mimeType contains 'video/' and trashed = false and 'me' in owners";
