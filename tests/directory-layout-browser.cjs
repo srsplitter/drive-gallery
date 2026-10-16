@@ -55,10 +55,26 @@ const root=path.resolve(__dirname,'..');
     await page.screenshot({path:path.join(root,'tests','directory-row-desktop.png'),fullPage:true});
     await page.setViewportSize({width:390,height:844});await page.waitForTimeout(150);await validate();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    const columns=()=>page.locator('.directory-columns');
+    assert.equal(await columns().isVisible(),true);
+    const videoColumns=await page.evaluate(()=>document.body.dataset.cols);
+    for(const count of [1,2,3,4]){
+      await columns().getByRole('button',{name:count+'단',exact:true}).click();
+      assert.equal(await page.locator('.tag-directory').evaluate(n=>getComputedStyle(n).gridTemplateColumns.split(' ').length),count);
+      assert.equal(await columns().getByRole('button',{name:count+'단',exact:true}).getAttribute('aria-pressed'),'true');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+      await validate();
+    }
+    assert.equal(await page.evaluate(()=>document.body.dataset.cols),videoColumns);
     await tiles().nth(1).locator('.cover-thumb').click();await validate();
     assert.equal(await page.locator('.directory-cover-row').count(),1);
     await page.screenshot({path:path.join(root,'tests','directory-row-phone.png'),fullPage:true});
     await tiles().nth(1).locator('.cover-thumb').click();assert.equal(await page.locator('.directory-cover-row').count(),0);
+    await page.locator('#catbar').getByRole('button',{name:'장르',exact:true}).click();
+    assert.equal(await columns().getByRole('button',{name:'4단',exact:true}).getAttribute('aria-pressed'),'true');
+    await page.evaluate(()=>setEditMode(false));
+    await columns().getByRole('button',{name:'2단',exact:true}).click();
+    assert.equal(await columns().getByRole('button',{name:'2단',exact:true}).getAttribute('aria-pressed'),'true');
     assert.deepEqual(errors,[]);console.log('PASS uniform tags, stable whole-row expansion, single open panel, centered bounded choices, resize/mobile, collapse');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

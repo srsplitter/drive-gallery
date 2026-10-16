@@ -303,6 +303,17 @@
   body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin { margin: 8px 0; }
   body:not(.editing) .tag-directory .star, body:not(.editing) .tag-directory .pen, body:not(.editing) .tag-directory .bin { display: none; }
   .tag-directory .star, .tag-directory .cnt, .tag-directory .pen, .tag-directory .bin { flex: none; }
+  .directory-columns { display: none; gap: 6px; margin-bottom: 12px; }
+  .directory-columns button[aria-pressed="true"] { background: var(--accent); color: var(--bg); }
+  @media (max-width: 520px) {
+    .directory-columns { display: flex; }
+    .tag-directory { grid-template-columns: repeat(var(--directory-cols, 2), minmax(0, 1fr)); }
+    .tag-directory .directory-heading { padding: 6px 3px; gap: 2px; font-size: 11px; }
+    .tag-directory .directory-name { flex: 1; }
+    .tag-directory .cnt { font-size: 10px; }
+    body.editing .tag-directory .star { padding: 2px 0; font-size: 12px; }
+    body.editing .tag-directory .pen, body.editing .tag-directory .bin { padding: 0; }
+  }
   .directory-cover-row { grid-column: 1 / -1; min-width: 0; }
   .directory-cover-row .cover-candidates { max-width: 100%; }
   .cover-thumb { display: inline-flex; flex: none; width: 80px; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px; background: var(--bg); align-items: center; justify-content: center; vertical-align: middle; }
@@ -1299,6 +1310,11 @@ function renderGrid() {
 // ---------- 검색 + 태그 유형 탐색 ----------
 let query = '', searchOpen = false, currentView = '', searchTimer = null;
 const directoryKinds = [['normal', '태그'], ['category', '카테고리'], ['genre', '장르'], ['character', '캐릭터']];
+let dirCols = 2;
+try {
+  const saved = Number(localStorage.getItem('dirCols'));
+  if ([1, 2, 3, 4].includes(saved)) dirCols = saved;
+} catch {}
 const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
 function directoryTabs() {
@@ -1339,8 +1355,22 @@ function renderCatbar() {
 }
 function renderDirectory() {
   const editing = document.body.classList.contains('editing'), counts = tagCounts();
+  document.body.style.setProperty('--directory-cols', dirCols);
+  const columns = el('div', { className: 'directory-columns', role: 'group' });
+  columns.setAttribute('aria-label', '태그 목록 단 수');
+  columns.append(...[1, 2, 3, 4].map(n => {
+    const button = el('button', { textContent: n + '단', onclick: () => {
+      const focused = document.activeElement;
+      dirCols = n;
+      try { localStorage.setItem('dirCols', n); } catch {}
+      renderGrid();
+      if (focused === button) $('#grid .directory-columns').children[n - 1].focus({ preventScroll: true });
+    } });
+    button.setAttribute('aria-pressed', String(dirCols === n));
+    return button;
+  }));
   const tags = [...counts.keys()].filter(t => tagKind(t) === currentView && (!query || t.toLowerCase().includes(query))).sort(window.GalleryOrder.compareText);
-  $('#grid').replaceChildren(el('div', { className: 'pills tag-directory' }, ...tags.map(t => DirectoryThumbs.item('tag:' + t, pill(t, counts.get(t), {
+  $('#grid').replaceChildren(columns, el('div', { className: 'pills tag-directory' }, ...tags.map(t => DirectoryThumbs.item('tag:' + t, pill(t, counts.get(t), {
     onclick: () => {
       if (document.body.classList.contains('editing')) { DirectoryThumbs.toggle('tag:' + t); renderGrid(); return; }
       clearTimeout(searchTimer);
