@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {planRename,removeWords,matchesKinds}=require('../title-editor.js');
+const {planRename,removeWords,matchesKinds,getSuggestions}=require('../title-editor.js');
 test('number only the supplied visible order and preserve extensions',()=>{
   const files=[{id:'c',name:'old.MOV'},{id:'a',name:'other.mp4'}];
   assert.deepEqual(planRename(files,'마리오').map(p=>[p.file.id,p.name]),[['c','마리오1.MOV'],['a','마리오2.mp4']]);
@@ -35,4 +35,18 @@ test('title-specific query never matches tag names',()=>{
   assert.equal(matchesKinds(file,{title:'mario'},data),false);
   assert.equal(matchesKinds(file,{title:'sample'},data),true);
   assert.equal(matchesKinds(file,{title:'sample',normal:'mario'},data),true);
+});
+test('suggestions include other kinds and exact selection excludes similar names',()=>{
+  const data={tags:{a:['Mario'],b:['SuperMario'],c:['MarioKart']},tagKinds:{Mario:'character',SuperMario:'character',MarioKart:'genre'},series:{s:{name:'Mario series',videoIds:['a']}}};
+  const suggestions=getSuggestions('mario','genre',data);
+  assert.equal(suggestions[0].kind,'genre');
+  assert.ok(suggestions.some(s=>s.kind==='character'&&s.value==='Mario'));
+  assert.ok(suggestions.some(s=>s.kind==='series'));
+  assert.deepEqual(getSuggestions('','normal',data),[]);
+  assert.deepEqual(getSuggestions('mario','title',data),[]);
+  assert.equal(matchesKinds({id:'b'},{character:'Mario'},data,{character:'Mario'}),false);
+  assert.equal(matchesKinds({id:'b'},{character:'Mario'},data),true);
+  const crowded={tags:{a:Array.from({length:15},(_,i)=>'Mario'+i).concat('MarioCategory')},tagKinds:{MarioCategory:'category'}};
+  assert.ok(getSuggestions('mario','normal',crowded).some(s=>s.kind==='category'));
+  assert.ok(getSuggestions('mario','normal',crowded).length<=12);
 });

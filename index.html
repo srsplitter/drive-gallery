@@ -332,6 +332,11 @@
   .title-kind-search { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin: 16px 0; }
   .title-kind-search label { margin: 0; min-width: 0; }
   .title-kind-search input { display: block; width: 100%; min-width: 0; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; }
+  .title-search-field { position: relative; min-width: 0; }
+  .title-search-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 8; max-height: 260px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 8px 24px #0006; }
+  .title-search-suggestions[hidden] { display: none; }
+  .title-search-suggestions button { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; width: 100%; margin: 0; padding: 7px 6px; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .title-suggestion-kind { color: var(--dim); font-size: 10px; }
   body.editing #titleEditor .card .name { cursor: pointer; }
   body.editing #titleEditor .card .name:hover { text-decoration: none; }
   .catscroll > [hidden] { display: none !important; }

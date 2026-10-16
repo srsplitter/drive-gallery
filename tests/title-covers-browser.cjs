@@ -182,6 +182,31 @@ const root=path.resolve(__dirname,'..');
       assert.ok(rows.slice(3).every(y=>Math.abs(y-rows[3])<2)&&rows[3]>rows[0]);
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     }
+    await page.evaluate(()=>{
+      items=['a','b','c','d','e','f'].map(id=>({id,name:id+'.mp4',mimeType:'video/mp4'}));
+      gallery.tags={a:['Mario'],b:['SuperMario'],c:['MarioKart'],d:['MarioParty'],e:['MarioNormal']};
+      gallery.tagKinds={Mario:'character',SuperMario:'character',MarioKart:'genre',MarioParty:'category'};
+      gallery.series={s:{name:'Mario series',videoIds:['f']}};gallery.order={};gallery.hidden={};query='';renderGrid();
+    });
+    await field('태그').fill('mario');await page.waitForTimeout(200);
+    const suggestion=(kind,value)=>page.locator('.title-search-suggestions:not([hidden]) button[data-kind="'+kind+'"][data-value="'+value+'"]');
+    assert.equal(await suggestion('character','Mario').count(),1);
+    assert.equal(await suggestion('category','MarioParty').count(),1);
+    assert.equal(await suggestion('series','Mario series').count(),1);
+    await suggestion('character','Mario').click();
+    assert.equal(await field('태그').inputValue(),'');assert.equal(await field('캐릭터').inputValue(),'Mario');
+    assert.deepEqual(await ids(),['a']);
+    await field('캐릭터').fill('Super');await page.waitForTimeout(200);assert.deepEqual(await ids(),['b']);
+    await field('캐릭터').press('Escape');assert.equal(await page.locator('.title-search-suggestions:not([hidden])').count(),0);
+    await clearKinds().click();await field('카테고리').fill('MarioParty');await page.waitForTimeout(200);
+    await field('장르').fill('mario');await page.waitForTimeout(200);await suggestion('character','Mario').click();
+    assert.equal(await field('카테고리').inputValue(),'MarioParty');assert.equal(await field('장르').inputValue(),'');assert.deepEqual(await ids(),[]);
+    await clearKinds().click();await field('장르').fill('mario');await page.waitForTimeout(200);await suggestion('series','Mario series').click();
+    assert.equal(await field('장르').inputValue(),'');assert.equal(await field('시리즈').inputValue(),'Mario series');assert.deepEqual(await ids(),['f']);
+    await titleQuery().fill('mario');await page.waitForTimeout(200);assert.equal(await page.locator('.title-search-suggestions:not([hidden])').count(),0);
+    await clearKinds().click();await page.setViewportSize({width:390,height:844});await field('태그').fill('mario');await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await page.screenshot({path:path.join(root,'tests','title-suggestions-phone.png'),fullPage:true});
     assert.deepEqual(errors,[]);
     console.log('PASS title persistent search/manual order/filtered numbering/single rename/exclusions/whole-word removal and directory/series covers/cache/persistence/mobile');
   }finally{await browser.close();}

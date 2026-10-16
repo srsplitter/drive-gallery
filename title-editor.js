@@ -31,16 +31,48 @@
 
   const kindLabels = { title: '제목', normal: '태그', category: '카테고리', genre: '장르', character: '캐릭터', series: '시리즈' };
   const queries = { title: '', normal: '', category: '', genre: '', character: '', series: '' };
-  function matchesKinds(file, queries, data) {
+  const exactSelections = {};
+  const normalizeSearch = value => String(value || '').normalize('NFKC').trim().toLowerCase();
+  function getSuggestions(query, currentKind, data) {
+    const needle = normalizeSearch(query);
+    if (!needle || currentKind === 'title') return [];
+    const entries = new Map();
+    function add(kind, value) {
+      if (!kindLabels[kind] || kind === 'title' || !normalizeSearch(value).includes(needle)) return;
+      const key = kind + '\u0000' + normalizeSearch(value);
+      if (!entries.has(key)) entries.set(key, { kind, value });
+    }
+    for (const tags of Object.values(data.tags || {})) {
+      for (const tag of tags || []) add((data.tagKinds || {})[tag] || 'normal', tag);
+    }
+    for (const series of Object.values(data.series || {})) {
+      if (series && series.name) add('series', series.name);
+    }
+    const sorted = [...entries.values()].sort((a, b) =>
+      Number(b.kind === currentKind) - Number(a.kind === currentKind)
+      || a.kind.localeCompare(b.kind) || a.value.localeCompare(b.value));
+    const firstByKind = new Map();
+    for (const item of sorted) if (!firstByKind.has(item.kind)) firstByKind.set(item.kind, item);
+    const selected = new Set(firstByKind.values());
+    for (const item of sorted) {
+      if (selected.size >= 12) break;
+      selected.add(item);
+    }
+    return sorted.filter(item => selected.has(item));
+  }
+  function matchesKinds(file, queries, data, exact = {}) {
     return Object.keys(kindLabels).every(kind => {
       const query = String(queries[kind] || '').trim().toLowerCase();
       if (!query) return true;
+      const matches = value => exact[kind] !== undefined
+        ? normalizeSearch(value) === normalizeSearch(exact[kind])
+        : String(value || '').toLowerCase().includes(query);
       if (kind === 'title') return file.name.toLowerCase().includes(query);
       if (kind === 'series') return Object.values(data.series || {}).some(series =>
         series && Array.isArray(series.videoIds) && series.videoIds.includes(file.id)
-        && String(series.name || '').toLowerCase().includes(query));
+        && matches(series.name));
       return ((data.tags || {})[file.id] || []).some(tag =>
-        (((data.tagKinds || {})[tag] || 'normal') === kind) && tag.toLowerCase().includes(query));
+        (((data.tagKinds || {})[tag] || 'normal') === kind) && matches(tag));
     });
   }
   const excluded = new Set();
@@ -55,7 +87,7 @@
   }
   let preview, status, excludedBadge, resetButton;
   const filter = list => list.filter(file => !excluded.has(file.id)
-    && matchesKinds(file, queries, typeof gallery === 'undefined' ? {} : gallery));
+    && matchesKinds(file, queries, typeof gallery === 'undefined' ? {} : gallery, exactSelections));
   const editing = () => document.body.classList.contains('editing');
   function clearExcluded() {
     excluded.clear();
@@ -336,20 +368,81 @@
     columns.append(left.box, right.box);
     const searches = node('div', '', 'title-kind-search');
     const searchInputs = [];
+    const searchFields = {};
     for (const [kind, title] of Object.entries(kindLabels)) {
+      const field = node('div', '', 'title-search-field');
       const label = node('label', title);
       const input = node('input');
+      const suggestions = node('div', '', 'title-search-suggestions');
+      suggestions.hidden = true;
+      suggestions.setAttribute('aria-label', `${title} 검색 추천`);
+      let dismissed = false;
+      function refreshSuggestions() {
+        suggestions.replaceChildren();
+        const focused = field.contains(document.activeElement);
+        const items = !dismissed && focused ? getSuggestions(input.value, kind,
+          typeof gallery === 'undefined' ? {} : gallery) : [];
+        suggestions.hidden = !items.length;
+        for (const item of items) {
+          const button = node('button');
+          button.type = 'button';
+          button.dataset.kind = item.kind;
+          button.dataset.value = item.value;
+          button.setAttribute('aria-label', `${kindLabels[item.kind]} ${item.value} 검색`);
+          button.append(node('span', kindLabels[item.kind], 'title-suggestion-kind'), node('span', item.value));
+          button.addEventListener('mousedown', event => event.preventDefault());
+          button.addEventListener('click', () => {
+            clearTimeout(searchTimer);
+            if (item.kind !== kind) {
+              queries[kind] = '';
+              input.value = '';
+              delete exactSelections[kind];
+            }
+            queries[item.kind] = item.value;
+            exactSelections[item.kind] = item.value;
+            const target = searchFields[item.kind];
+            target.input.value = item.value;
+            dismissed = true;
+            suggestions.hidden = true;
+            target.close();
+            renderGrid();
+            queueMicrotask(() => {
+              if (target.input.isConnected) target.input.focus({ preventScroll: true });
+            });
+          });
+          suggestions.append(button);
+        }
+      }
+      searchFields[kind] = { input, close() { dismissed = true; suggestions.hidden = true; } };
       input.type = 'text';
       input.value = queries[kind];
       input.placeholder = `${title} 검색`;
       input.setAttribute('aria-label', kind === 'title' ? '제목으로 동영상 검색' : `${title}로 동영상 검색`);
       input.addEventListener('input', () => {
         queries[kind] = input.value;
+        delete exactSelections[kind];
+        dismissed = false;
+        refreshSuggestions();
         clearTimeout(searchTimer);
         searchTimer = setTimeout(() => renderGrid(), 150);
       });
+      input.addEventListener('focus', refreshSuggestions);
+      field.addEventListener('focusout', () => {
+        setTimeout(() => {
+          if (!field.contains(document.activeElement)) suggestions.hidden = true;
+        }, 0);
+      });
+      field.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          dismissed = true;
+          suggestions.hidden = true;
+          input.focus({ preventScroll: true });
+        }
+      });
       label.append(input);
-      searches.append(label);
+      field.append(label);
+      if (kind !== 'title') field.append(suggestions);
+      searches.append(field);
       searchInputs.push(input);
     }
     const clearSearch = node('button', '분류 검색 초기화', 'chip');
@@ -358,6 +451,8 @@
     clearSearch.addEventListener('click', () => {
       clearTimeout(searchTimer);
       for (const kind of Object.keys(queries)) queries[kind] = '';
+      for (const kind of Object.keys(exactSelections)) delete exactSelections[kind];
+      for (const field of Object.values(searchFields)) field.close();
       for (const input of searchInputs) input.value = '';
       renderGrid();
     });
@@ -407,7 +502,7 @@
     });
     return wrapper;
   }
-  const exported = { getJobs, planRename, removeWords, matchesKinds, renderMemos, clearExcluded, filter, render };
+  const exported = { getJobs, planRename, removeWords, matchesKinds, getSuggestions, renderMemos, clearExcluded, filter, render };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   else root.TitleEditor = exported;
 })(globalThis);
