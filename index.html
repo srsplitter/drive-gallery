@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>갤러리</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/gallery-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/gallery-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#111317">
 <style>
   :root {
     --bg: #111317; --panel: #1b1e24; --line: #2a2e36; --text: #e8eaee; --dim: #9aa1ad;
@@ -361,7 +364,7 @@
 </head>
 <body>
 <header>
-  <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon">🍑</span><span>갤러리</span></button></h1>
+  <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon"><img src="icons/gallery-192.png" alt=""></span><span>갤러리</span></button></h1>
   <input id="brandFile" type="file" accept="image/*" hidden>
   <div id="crumbs"></div>
   <span id="saveState"></span>

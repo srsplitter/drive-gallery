@@ -9,12 +9,44 @@ const root=path.resolve(__dirname,'..');
     const u=new URL(route.request().url());if(u.hostname!=='gallery.test')return route.abort();
     const file=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':u.pathname));
     if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.fulfill({status:404,body:''});
-    return route.fulfill({contentType:file.endsWith('.js')?'application/javascript':'text/html; charset=utf-8',body:fs.readFileSync(file)});
+    const contentType={'.js':'application/javascript','.png':'image/png','.webmanifest':'application/manifest+json'}[path.extname(file)]||'text/html; charset=utf-8';
+    return route.fulfill({contentType,body:fs.readFileSync(file)});
   });
   const geometry=()=>page.evaluate(()=>({header:document.querySelector('header').getBoundingClientRect().top,bottom:document.querySelector('header').getBoundingClientRect().bottom,nav:document.querySelector('#catbar').getBoundingClientRect().top}));
+  const imageSize=src=>page.evaluate(async src=>{const img=new Image();img.src=src;await img.decode();return [img.naturalWidth,img.naturalHeight];},src);
+  const universalIcons=async()=>{
+    const apple=page.locator('link[rel="apple-touch-icon"]');
+    assert.equal(await apple.getAttribute('href'),'icons/gallery-180.png');
+    assert.deepEqual(await imageSize(await apple.getAttribute('href')),[180,180]);
+    const manifest=await page.evaluate(async()=>{
+      const response=await fetch(document.querySelector('link[rel="manifest"]').href);
+      if(!response.ok)throw Error('Manifest unavailable');
+      return {type:response.headers.get('content-type'),body:await response.json(),url:response.url};
+    });
+    assert.ok(manifest.type.startsWith('application/manifest+json'));
+    assert.equal(manifest.body.display,'browser');
+    for(const size of [192,512]){
+      const entry=manifest.body.icons.find(icon=>icon.src===`icons/gallery-${size}.png`);
+      assert.ok(entry,`Missing manifest icon ${size}`);
+      assert.equal(entry.sizes,`${size}x${size}`);assert.equal(entry.type,'image/png');
+      assert.deepEqual(await imageSize(new URL(entry.src,manifest.url).href),[size,size]);
+    }
+  };
+  const defaultIcons=async()=>{
+    assert.equal(await page.locator('#brandIcon img').getAttribute('src'),'icons/gallery-192.png');
+    assert.deepEqual(await imageSize('icons/gallery-192.png'),[192,192]);
+    const favicon=page.locator('link[rel="icon"]');
+    assert.equal(await favicon.getAttribute('href'),'icons/gallery-32.png');
+    assert.equal(await favicon.getAttribute('type'),'image/png');
+    assert.equal(await favicon.getAttribute('sizes'),'32x32');
+    assert.deepEqual(await imageSize(await favicon.getAttribute('href')),[32,32]);
+  };
   try{
     await page.goto('https://gallery.test/');assert.equal(await page.title(),'갤러리');
-    assert.ok((await page.locator('#siteLogo').textContent()).includes('🍑'));assert.ok((await page.locator('#siteLogo').textContent()).includes('갤러리'));
+    await defaultIcons();await universalIcons();
+    assert.ok((await page.locator('#siteLogo').textContent()).includes('갤러리'));
+    const viewport=await page.locator('meta[name="viewport"]').getAttribute('content');
+    for(const setting of ['width=device-width','initial-scale=1','viewport-fit=cover'])assert.ok(viewport.split(',').map(v=>v.trim()).includes(setting));
     await page.evaluate(()=>{
       prefetchCandidates=()=>{};window.originalFlush=flushSaves;window.savedChanges=[];flushSaves=async()=>{window.savedChanges.push(...pendingSaves);pendingSaves.clear();};
       gallery={videos:{},hidden:{},tags:{},fav:{},hiddenCats:{},exUse:{},loved:{},tagKinds:{},marks:{},series:{},order:{},covers:{},settings:{}};
@@ -34,10 +66,14 @@ const root=path.resolve(__dirname,'..');
     assert.ok(value.startsWith('data:image/png;base64,'));
     assert.equal(await page.locator('#brandIcon img').getAttribute('src'),value);
     assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'),value);
+    assert.equal(await page.locator('link[rel="icon"]').getAttribute('type'),'image/png');
+    assert.equal(await page.locator('link[rel="icon"]').getAttribute('sizes'),null);
+    await universalIcons();
     assert.ok(await page.evaluate(()=>window.savedChanges.some(([k])=>k==='u:icon')));
     const dimensions=await page.evaluate(async()=>{const img=new Image();img.src=gallery.settings.icon;await img.decode();return [img.naturalWidth,img.naturalHeight];});
     assert.deepEqual(dimensions,[256,256]);
-    await page.evaluate(value=>{const data={settings:{},videos:{}};applyChanges(data,new Map([['u:icon',value]]));window.roundtrip=data.settings.icon;Branding.apply(null);Branding.apply(data.settings.icon);},value);
+    await page.evaluate(()=>Branding.apply(null));await defaultIcons();
+    await page.evaluate(value=>{const data={settings:{},videos:{}};applyChanges(data,new Map([['u:icon',value]]));window.roundtrip=data.settings.icon;Branding.apply(data.settings.icon);},value);
     assert.equal(await page.evaluate(()=>window.roundtrip),value);
     assert.equal(await page.locator('#brandIcon img').count(),1);
     await page.setViewportSize({width:390,height:844});await page.evaluate(()=>scrollTo(0,650));await page.waitForTimeout(100);
@@ -48,6 +84,7 @@ const root=path.resolve(__dirname,'..');
       token='account-b';gallery={videos:{},settings:{}};applyChanges(gallery,pendingSaves);
     });
     assert.equal(await page.evaluate(()=>gallery.settings.icon),undefined);
+    await defaultIcons();await universalIcons();
     await page.evaluate(value=>{
       token='account-a';pendingSaves.set('u:icon',value);window.accountWrites=[];
       readRemote=async()=>new Promise(resolve=>window.resolveOldRead=resolve);
@@ -62,8 +99,7 @@ const root=path.resolve(__dirname,'..');
     assert.equal(await page.evaluate(()=>window.accountWrites.length),0);
     assert.equal(await page.evaluate(()=>pendingSaves.has('u:icon')),false);
     assert.equal(await page.evaluate(()=>gallery.settings.icon),undefined);
-    assert.equal(await page.locator('#brandIcon').textContent(),'🍑');
-    assert.ok((await page.locator('link[rel="icon"]').getAttribute('href')).endsWith('favicon.svg'));
+    await defaultIcons();await universalIcons();
     await page.evaluate(value=>{
       token='account-a';pendingSaves.set('u:icon',value);window.resumeWrites=[];let reads=0;
       readRemote=async()=>++reads===1?new Promise(resolve=>window.resolvePausedRead=resolve):{fileId:'account-b-metadata',data:{videos:{},settings:{}}};
@@ -80,6 +116,6 @@ const root=path.resolve(__dirname,'..');
     await page.waitForFunction(()=>window.resumeWrites.length===1&&!pendingSaves.has('u:icon'));
     assert.ok((await page.evaluate(()=>window.resumeWrites[0].url)).includes('account-b-metadata'));
     assert.equal(await page.evaluate(()=>window.resumeWrites[0].body.settings.icon),await page.evaluate(()=>window.bIcon));
-    assert.deepEqual(errors,[]);console.log('PASS peach brand, desktop shared sticky/dynamic height, mobile behavior, logo file chooser, 256px PNG/favicon, settings persistence, logout reset');
+    assert.deepEqual(errors,[]);console.log('PASS static PNG brand/favicon, apple/manifest decoded sizes, viewport metadata, desktop shared sticky/dynamic height, mobile behavior, logo file chooser, 256px PNG/favicon, settings persistence, logout reset/account isolation');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

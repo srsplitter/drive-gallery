@@ -11,18 +11,15 @@ const Branding = (() => {
     apply(null);
   }
   function apply(value) {
-    if (typeof value === 'string' && value.startsWith('data:image/png;base64,') && value.length <= 1000000) {
-      const image = document.createElement('img');
-      image.alt = '';
-      image.src = value;
-      icon.replaceChildren(image);
-      favicon.href = value;
-      favicon.type = 'image/png';
-    } else {
-      icon.textContent = '🍑';
-      favicon.href = 'favicon.svg';
-      favicon.type = 'image/svg+xml';
-    }
+    const custom = typeof value === 'string' && value.startsWith('data:image/png;base64,') && value.length <= 1000000;
+    const image = document.createElement('img');
+    image.alt = '';
+    image.src = custom ? value : 'icons/gallery-192.png';
+    icon.replaceChildren(image);
+    favicon.href = custom ? value : 'icons/gallery-32.png';
+    favicon.type = 'image/png';
+    if (custom) favicon.removeAttribute('sizes');
+    else favicon.setAttribute('sizes', '32x32');
   }
   logo.addEventListener('click', () => {
     if (!token) { setStatus('로그인 후 아이콘을 바꿀 수 있어요.'); return; }
