@@ -1,6 +1,7 @@
 const {chromium}=require('C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');
+const version='20261017-logo2';
 (async()=>{
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];
@@ -9,15 +10,16 @@ const root=path.resolve(__dirname,'..');
     const u=new URL(route.request().url());if(u.hostname!=='gallery.test')return route.abort();
     const file=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':u.pathname));
     if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.fulfill({status:404,body:''});
-    const contentType={'.js':'application/javascript','.png':'image/png','.webmanifest':'application/manifest+json'}[path.extname(file)]||'text/html; charset=utf-8';
+    const contentType={'.js':'application/javascript','.png':'image/png','.ico':'image/x-icon','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'}[path.extname(file)]||'text/html; charset=utf-8';
     return route.fulfill({contentType,body:fs.readFileSync(file)});
   });
   const geometry=()=>page.evaluate(()=>({header:document.querySelector('header').getBoundingClientRect().top,bottom:document.querySelector('header').getBoundingClientRect().bottom,nav:document.querySelector('#catbar').getBoundingClientRect().top}));
   const imageSize=src=>page.evaluate(async src=>{const img=new Image();img.src=src;await img.decode();return [img.naturalWidth,img.naturalHeight];},src);
   const universalIcons=async()=>{
     const apple=page.locator('link[rel="apple-touch-icon"]');
-    assert.equal(await apple.getAttribute('href'),'icons/gallery-180.png');
+    assert.equal(await apple.getAttribute('href'),`icons/gallery-180.png?v=${version}`);
     assert.deepEqual(await imageSize(await apple.getAttribute('href')),[180,180]);
+    assert.equal(await page.locator('link[rel="manifest"]').getAttribute('href'),`manifest.webmanifest?v=${version}`);
     const manifest=await page.evaluate(async()=>{
       const response=await fetch(document.querySelector('link[rel="manifest"]').href);
       if(!response.ok)throw Error('Manifest unavailable');
@@ -26,7 +28,7 @@ const root=path.resolve(__dirname,'..');
     assert.ok(manifest.type.startsWith('application/manifest+json'));
     assert.equal(manifest.body.display,'browser');
     for(const size of [192,512]){
-      const entry=manifest.body.icons.find(icon=>icon.src===`icons/gallery-${size}.png`);
+      const entry=manifest.body.icons.find(icon=>icon.src===`icons/gallery-${size}.png?v=${version}`);
       assert.ok(entry,`Missing manifest icon ${size}`);
       assert.equal(entry.sizes,`${size}x${size}`);assert.equal(entry.type,'image/png');
       assert.deepEqual(await imageSize(new URL(entry.src,manifest.url).href),[size,size]);
@@ -36,14 +38,40 @@ const root=path.resolve(__dirname,'..');
     assert.equal(await page.locator('#brandIcon img').getAttribute('src'),'icons/gallery-192.png');
     assert.deepEqual(await imageSize('icons/gallery-192.png'),[192,192]);
     const favicon=page.locator('link[rel="icon"]');
-    assert.equal(await favicon.getAttribute('href'),'icons/gallery-32.png');
-    assert.equal(await favicon.getAttribute('type'),'image/png');
-    assert.equal(await favicon.getAttribute('sizes'),'32x32');
-    assert.deepEqual(await imageSize(await favicon.getAttribute('href')),[32,32]);
+    assert.equal(await favicon.getAttribute('href'),`favicon.ico?v=${version}`);
+    assert.equal(await favicon.getAttribute('type'),'image/x-icon');
+    assert.equal(await favicon.getAttribute('sizes'),'16x16 32x32 48x48');
+    const dimensions=await imageSize(await favicon.getAttribute('href'));
+    assert.ok([16,32,48].includes(dimensions[0])&&dimensions[0]===dimensions[1]);
   };
   try{
     await page.goto('https://gallery.test/');assert.equal(await page.title(),'갤러리');
     await defaultIcons();await universalIcons();
+    assert.equal(await page.locator('script[src^="branding.js"]').getAttribute('src'),`branding.js?v=${version}`);
+    for(const size of [32,180,192,512])assert.deepEqual(await imageSize(`icons/gallery-${size}.png`),[size,size]);
+    assert.deepEqual(await imageSize('favicon.svg'),[192,192]);
+    const svg=fs.readFileSync(path.join(root,'favicon.svg'),'utf8');
+    const embedded=svg.match(/(?:xlink:)?href=["']data:image\/png;base64,([^"']+)["']/);
+    assert.ok(embedded,'Legacy SVG must embed replacement PNG');
+    assert.deepEqual(Buffer.from(embedded[1],'base64'),fs.readFileSync(path.join(root,'icons/gallery-192.png')));
+    assert.doesNotMatch(svg,/<(?:path|ellipse|circle|polygon|rect)\b/i,'Legacy peach vector must be removed');
+    const ico=fs.readFileSync(path.join(root,'favicon.ico'));
+    assert.equal(ico.readUInt16LE(0),0);assert.equal(ico.readUInt16LE(2),1);assert.equal(ico.readUInt16LE(4),3);
+    const icoSizes=[];
+    for(let i=0;i<3;i++){
+      const entry=6+i*16,width=ico[entry]||256,height=ico[entry+1]||256;
+      icoSizes.push(width);assert.equal(height,width);
+      const length=ico.readUInt32LE(entry+8),offset=ico.readUInt32LE(entry+12),png=ico.subarray(offset,offset+length);
+      assert.equal(png.length,length);assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+      assert.deepEqual(await imageSize('data:image/png;base64,'+png.toString('base64')),[width,height]);
+    }
+    assert.deepEqual(icoSizes.sort((a,b)=>a-b),[16,32,48]);
+    // Chromium does not expose bare /favicon.ico to this routed fixture (even
+    // fetch fails before route/requestfailed). Decode the exact root file bytes;
+    // defaultIcons separately decodes the production versioned URL. Verify bare
+    // root HTTP status, MIME and byte hash against deployment outside this fixture.
+    const legacyIco=await imageSize('data:image/x-icon;base64,'+ico.toString('base64'));
+    assert.ok([16,32,48].includes(legacyIco[0])&&legacyIco[0]===legacyIco[1]);
     assert.ok((await page.locator('#siteLogo').textContent()).includes('갤러리'));
     const viewport=await page.locator('meta[name="viewport"]').getAttribute('content');
     for(const setting of ['width=device-width','initial-scale=1','viewport-fit=cover'])assert.ok(viewport.split(',').map(v=>v.trim()).includes(setting));
@@ -116,6 +144,6 @@ const root=path.resolve(__dirname,'..');
     await page.waitForFunction(()=>window.resumeWrites.length===1&&!pendingSaves.has('u:icon'));
     assert.ok((await page.evaluate(()=>window.resumeWrites[0].url)).includes('account-b-metadata'));
     assert.equal(await page.evaluate(()=>window.resumeWrites[0].body.settings.icon),await page.evaluate(()=>window.bIcon));
-    assert.deepEqual(errors,[]);console.log('PASS static PNG brand/favicon, apple/manifest decoded sizes, viewport metadata, desktop shared sticky/dynamic height, mobile behavior, logo file chooser, 256px PNG/favicon, settings persistence, logout reset/account isolation');
+    assert.deepEqual(errors,[]);console.log('PASS versioned ICO favicon (16/32/48 PNG entries), legacy SVG replacement PNG, legacy/new icon decode, versioned apple/manifest/branding, viewport metadata, desktop shared sticky/dynamic height, mobile behavior, logo file chooser, 256px PNG/favicon, settings persistence, logout reset/account isolation');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

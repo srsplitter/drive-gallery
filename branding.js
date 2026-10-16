@@ -16,10 +16,10 @@ const Branding = (() => {
     image.alt = '';
     image.src = custom ? value : 'icons/gallery-192.png';
     icon.replaceChildren(image);
-    favicon.href = custom ? value : 'icons/gallery-32.png';
-    favicon.type = 'image/png';
+    favicon.href = custom ? value : 'favicon.ico?v=20261017-logo2';
+    favicon.type = custom ? 'image/png' : 'image/x-icon';
     if (custom) favicon.removeAttribute('sizes');
-    else favicon.setAttribute('sizes', '32x32');
+    else favicon.setAttribute('sizes', '16x16 32x32 48x48');
   }
   logo.addEventListener('click', () => {
     if (!token) { setStatus('로그인 후 아이콘을 바꿀 수 있어요.'); return; }
