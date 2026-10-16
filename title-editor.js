@@ -45,8 +45,15 @@
   }
   const excluded = new Set();
   let searchTimer;
-  let shown = [], busy = false, memoWrap, baseInput, wordsInput, renameButton, removeButton;
-  let preview, status, excludedBadge, resetButton, clearButtons = [];
+  let shown = [], memoWrap, baseInput, wordsInput, renameButton, removeButton;
+  const jobs = [], fileTails = new Map(), lastWriter = new Map();
+  let scopePromise;
+  function writeScope() {
+    if (!scopePromise) scopePromise = Promise.resolve().then(() => ensureWriteScope())
+      .finally(() => { scopePromise = undefined; });
+    return scopePromise;
+  }
+  let preview, status, excludedBadge, resetButton;
   const filter = list => list.filter(file => !excluded.has(file.id)
     && matchesKinds(file, queries, typeof gallery === 'undefined' ? {} : gallery));
   const editing = () => document.body.classList.contains('editing');
@@ -76,63 +83,212 @@
     const removal = removalPlan(files);
     preview.textContent = `대상 ${files.length}개 · 일괄 이름 ${rename.length}개 · 단어 제거 ${removal.plans.length}개 · 빈 이름 건너뜀 ${removal.skipped.length}개`;
     excludedBadge.textContent = `제목 편집 제외 ${excluded.size}개`;
-    resetButton.disabled = busy || !excluded.size;
-    renameButton.disabled = busy || !rename.length;
-    removeButton.disabled = busy || !removal.plans.length;
-    baseInput.disabled = wordsInput.disabled = busy;
-    for (const button of clearButtons) button.disabled = busy;
+    resetButton.disabled = !excluded.size;
+    renameButton.disabled = !rename.length;
+    removeButton.disabled = !removal.plans.length;
   }
-  function updateProgress(label, total, success, failed, detail = '') {
-    const processed = success + failed;
-    const message = `${label} ${processed}/${total} (${Math.floor(processed / total * 100)}%) · 성공 ${success} · 실패 ${failed}` + (detail ? ` · ${detail}` : '');
-    status.textContent = message;
-    const header = document.getElementById('titleProgress');
-    if (header) {
-      header.textContent = message;
-      header.hidden = false;
+  function getJobs() {
+    return jobs.map(job => ({ id: job.id, state: job.state, total: job.plans.length,
+      processed: job.success + job.failed, success: job.success, failed: job.failed,
+      canceled: job.canceled, cancelled: job.canceled,
+      rollbackTotal: job.rollbackTotal, rollbackProcessed: job.rollbackProcessed,
+      rollbackSuccess: job.rollbackSuccess, rollbackFailed: job.rollbackFailed,
+      rollbackSkipped: job.rollbackSkipped,
+      skipped: job.state === 'canceled' ? job.plans.length - job.success - job.failed : 0 }));
+  }
+  function renderJobs() {
+    const terminal = new Set(jobs.filter(job => ['completed', 'canceled', 'failed'].includes(job.state))
+      .slice(-3));
+    const visibleJobs = jobs.filter(job => !['completed', 'canceled', 'failed'].includes(job.state)
+      || terminal.has(job));
+    const labels = { waiting: '권한 확인 중', running: '제목 변경 중', canceling: '취소 요청',
+      restoring: '되돌리는 중', completed: '제목 변경 완료', canceled: '취소·복원 완료',
+      'restore-failed': '취소·복원실패', failed: '제목 변경 실패' };
+    for (const container of [status, document.getElementById('titleProgress')]) {
+      if (!container) continue;
+      container.replaceChildren();
+      container.hidden = !jobs.length;
+      for (const job of visibleJobs) {
+        const processed = job.success + job.failed;
+        const row = node('span', '', 'title-job');
+        row.dataset.jobId = String(job.id);
+        row.append(node('span', '작업 ' + job.id + ' · ' + labels[job.state] + ' ' + processed + '/' + job.plans.length
+          + ' (' + Math.floor(processed / job.plans.length * 100) + '%) · 성공 ' + job.success + ' · 실패 ' + job.failed
+          + ' · 빈 이름 건너뜀 ' + job.empty + '개'
+          + (job.canceled ? ' · ' + (job.state === 'restoring' ? '되돌리는 중 ' : '복원 처리 ') + job.rollbackProcessed + '/' + job.rollbackTotal
+            + ' · 복원 성공 ' + job.rollbackSuccess + ' · 복원실패 ' + job.rollbackFailed
+            + ' · 새 수정 건너뜀 ' + job.rollbackSkipped : '')
+          + (job.canceled ? ' · 취소 건너뜀 ' + (job.plans.length - processed) + '개' : '')
+          + (job.error ? ' · ' + job.error : '')));
+        if (['waiting', 'running', 'canceling'].includes(job.state)) {
+          const button = node('button', job.canceled ? '취소 요청' : '취소', 'chip');
+          button.type = 'button';
+          button.setAttribute('aria-label', '제목 작업 ' + job.id + ' 취소');
+          button.disabled = job.canceled;
+          button.addEventListener('click', () => {
+            job.canceled = true;
+            job.state = 'canceling';
+            // Append now, so submissions after cancellation wait for restoration.
+            job.rollbackSlots = job.plans.map(reserve);
+            job.cancel();
+            renderJobs();
+          });
+          row.append(button);
+        }
+        if (job.state === 'restore-failed') {
+          const retry = node('button', '복원 재시도', 'chip');
+          retry.type = 'button';
+          retry.setAttribute('aria-label', '제목 작업 ' + job.id + ' 복원 재시도');
+          retry.addEventListener('click', () => {
+            if (job.state !== 'restore-failed') return;
+            job.rollbackSlots = job.plans.filter(plan => job.applied.has(plan.id)).map(reserve);
+            void retryRestore(job);
+          });
+          row.append(retry);
+        }
+        container.append(row);
+      }
     }
   }
-  async function apply(kind) {
-    if (busy) return;
-    // Snapshot the current displayed order and exclusions before any request.
-    const files = filter(shown).slice();
-    const removal = kind === 'remove' ? removalPlan(files) : { skipped: [] };
-    const plans = kind === 'remove' ? removal.plans : planRename(files, baseInput.value);
-    if (!plans.length) return;
-    busy = true;
-    updateControls();
-    let success = 0, failed = 0, lastError = '', stopped = '';
-    updateProgress('권한 확인 중', plans.length, success, failed);
+  function reserve(plan) {
+    const previous = fileTails.get(plan.id) || Promise.resolve();
+    let release;
+    const ownRelease = new Promise(resolve => { release = resolve; });
+    const tail = Promise.all([previous, ownRelease]);
+    fileTails.set(plan.id, tail);
+    tail.then(() => { if (fileTails.get(plan.id) === tail) fileTails.delete(plan.id); });
+    return { plan, previous, release };
+  }
+  function restoreOrigin(id, saved) {
+    const seen = new Set();
+    while (saved.writer !== undefined && !seen.has(saved.writer)) {
+      seen.add(saved.writer);
+      const writer = jobs.find(job => job.id === saved.writer);
+      if (!writer || !writer.canceled) break;
+      const original = writer.origins.get(id);
+      if (!original) break;
+      saved = original;
+    }
+    return saved;
+  }
+  async function restoreJob(job) {
+    job.state = 'restoring';
+    // Progress/failures describe this attempt; successes/skips remain cumulative.
+    job.rollbackProcessed = 0;
+    job.rollbackFailed = 0;
+    job.error = '';
+    job.rollbackTotal = job.applied.size;
+    renderJobs();
     try {
-      if (!await ensureWriteScope()) {
-        stopped = 'Google Drive 수정 권한을 받지 못해 취소했어요. 변경된 파일은 없습니다.';
-        return;
-      }
-      updateProgress('제목 변경 중', plans.length, success, failed);
-      for (const { file, name } of plans) {
+      for (const slot of job.rollbackSlots) {
         try {
-          const response = await api(`${DRIVE}/files/${encodeURIComponent(file.id)}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          file.name = name;
-          success++;
-        } catch (error) {
-          failed++;
-          lastError = error.message || String(error);
+          await slot.previous;
+          const saved = job.applied.get(slot.plan.id);
+          if (!saved) continue;
+          const { file, id, name } = slot.plan;
+          if (lastWriter.get(id) !== job.id || file.name !== name) {
+            job.rollbackSkipped++;
+            job.applied.delete(id);
+          } else {
+            try {
+              if (!await writeScope()) throw new Error('Google Drive 수정 권한을 받지 못했습니다.');
+              const original = restoreOrigin(id, saved);
+              const response = await api(DRIVE + '/files/' + encodeURIComponent(id), {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: original.name })
+              });
+              if (!response.ok) throw new Error('HTTP ' + response.status);
+              file.name = original.name;
+              if (original.writer === undefined) lastWriter.delete(id);
+              else lastWriter.set(id, original.writer);
+              job.rollbackSuccess++;
+              job.applied.delete(id);
+            } catch (error) {
+              job.rollbackFailed++;
+              job.error = '복원실패: ' + (error.message || String(error));
+            }
+          }
+          job.rollbackProcessed++;
         } finally {
-          updateProgress('제목 변경 중', plans.length, success, failed);
+          slot.release();
+          renderJobs();
         }
       }
-    } catch (error) {
-      stopped = `Google Drive 수정 권한 확인 실패: ${error.message || String(error)} · 변경된 파일은 없습니다.`;
     } finally {
-      busy = false;
-      updateProgress(stopped ? '제목 변경 취소' : '제목 변경 완료', plans.length, success, failed,
-        `빈 이름 건너뜀 ${removal.skipped.length}개` + (stopped ? ` · ${stopped}` : '') + (lastError ? ` · ${lastError}` : ''));
+      for (const slot of job.rollbackSlots) slot.release();
+    }
+  }
+  async function retryRestore(job) {
+    await restoreJob(job);
+    job.state = job.rollbackFailed ? 'restore-failed' : 'canceled';
+    renderJobs();
+    updateControls();
+    renderGrid();
+  }
+  async function runJob(job) {
+    try {
+      const granted = await Promise.race([writeScope(), job.cancellation]);
+      if (job.canceled) return;
+      if (!granted) {
+        job.error = 'Google Drive 수정 권한을 받지 못했습니다. 변경된 파일은 없습니다.';
+        job.state = 'failed';
+        return;
+      }
+      job.state = 'running';
+      renderJobs();
+      for (const slot of job.slots) {
+        await Promise.race([slot.previous, job.cancellation]);
+        if (job.canceled) break;
+        const { file, id, name } = slot.plan;
+        try {
+          const original = { name: file.name, writer: lastWriter.get(id) };
+          const response = await api(DRIVE + '/files/' + encodeURIComponent(id), {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+          });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          file.name = name;
+          lastWriter.set(id, job.id);
+          job.applied.set(id, original);
+          job.origins.set(id, original);
+          job.success++;
+        } catch (error) {
+          job.failed++;
+          job.error = error.message || String(error);
+        } finally {
+          slot.release();
+          renderJobs();
+        }
+        if (job.canceled) break;
+      }
+    } catch (error) {
+      job.state = 'failed';
+      job.error = 'Google Drive 수정 권한 확인 실패: ' + (error.message || String(error));
+    } finally {
+      // Released canceled slots still await older reservations before successors run.
+      for (const slot of job.slots) slot.release();
+      if (job.canceled) await restoreJob(job);
+      job.state = job.canceled ? (job.rollbackFailed ? 'restore-failed' : 'canceled')
+        : job.state === 'failed' ? 'failed' : 'completed';
+      renderJobs();
       updateControls();
       renderGrid();
     }
+  }
+  function apply(kind) {
+    const files = filter(shown).slice();
+    const removal = kind === 'remove' ? removalPlan(files) : { skipped: [] };
+    const draft = kind === 'remove' ? removal.plans : planRename(files, baseInput.value);
+    if (!draft.length) return;
+    const plans = Object.freeze(draft.map(({ file, name }) => Object.freeze({ file, id: file.id, name })));
+    const job = { id: jobs.length + 1, plans, state: 'waiting', success: 0, failed: 0,
+      canceled: false, empty: removal.skipped.length, error: '', applied: new Map(), origins: new Map(),
+      rollbackTotal: 0, rollbackProcessed: 0, rollbackSuccess: 0, rollbackFailed: 0, rollbackSkipped: 0 };
+    job.cancellation = new Promise(resolve => { job.cancel = () => resolve(false); });
+    // Reserve all files synchronously before permission or scheduling can yield.
+    job.slots = plans.map(reserve);
+    jobs.push(job);
+    renderJobs();
+    void runJob(job);
   }
   function memo(labelText, hint, actionText, kind) {
     const box = node('div', '', 'title-memo');
@@ -160,7 +316,6 @@
     const clear = node('button', '입력 지우기', 'chip');
     clear.type = 'button';
     clear.addEventListener('click', () => {
-      if (busy) return;
       input.value = '';
       updateControls();
       input.focus();
@@ -176,7 +331,6 @@
     const right = memo('완전한 단어 제거', '쉼표·줄바꿈·공백 구분 · .mp4 입력 시 확장자 제거', 'Google Drive 단어 제거', 'remove');
     baseInput = left.input; renameButton = left.button;
     wordsInput = right.input; removeButton = right.button;
-    clearButtons = [left.clear, right.clear];
     const columns = node('div');
     columns.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px';
     columns.append(left.box, right.box);
@@ -218,6 +372,7 @@
     resetButton.addEventListener('click', () => { clearExcluded(); renderGrid(); });
     memoWrap.append(notice, columns, searches, clearSearch, preview, excludedBadge, resetButton, status);
     updateControls();
+    renderJobs();
     return memoWrap;
   }
   function render(list, counts) {
@@ -236,7 +391,6 @@
         if (!editing()) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (busy) return;
         excluded.add(file.id);
         card.remove();
         updateControls();
@@ -253,7 +407,7 @@
     });
     return wrapper;
   }
-  const exported = { planRename, removeWords, matchesKinds, renderMemos, clearExcluded, filter, render };
+  const exported = { getJobs, planRename, removeWords, matchesKinds, renderMemos, clearExcluded, filter, render };
   if (typeof module !== 'undefined' && module.exports) module.exports = exported;
   else root.TitleEditor = exported;
 })(globalThis);
