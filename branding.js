@@ -4,6 +4,9 @@ const Branding = (() => {
   const input = document.getElementById('brandFile');
   const icon = document.getElementById('brandIcon');
   const favicon = document.querySelector('link[rel="icon"]');
+  // Safari cannot reliably use account-specific data URLs as website icons.
+  const safari = /Safari\//.test(navigator.userAgent)
+    && !/(Chrome|Chromium|CriOS|FxiOS|Edg|EdgiOS|OPR)\//.test(navigator.userAgent);
   let session = 0;
   function logout() {
     session++;
@@ -16,10 +19,10 @@ const Branding = (() => {
     image.alt = '';
     image.src = custom ? value : 'icons/gallery-192.png';
     icon.replaceChildren(image);
-    favicon.href = custom ? value : 'favicon.ico?v=20261017-logo2';
-    favicon.type = custom ? 'image/png' : 'image/x-icon';
-    if (custom) favicon.removeAttribute('sizes');
-    else favicon.setAttribute('sizes', '16x16 32x32 48x48');
+    favicon.href = custom && !safari ? value : 'site-icon-20261017.png';
+    favicon.type = 'image/png';
+    if (custom && !safari) favicon.removeAttribute('sizes');
+    else favicon.setAttribute('sizes', '180x180');
   }
   logo.addEventListener('click', () => {
     if (!token) { setStatus('로그인 후 아이콘을 바꿀 수 있어요.'); return; }

@@ -2,6 +2,7 @@ const {chromium}=require('C:/Users/admin/.cache/codex-runtimes/codex-primary-run
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');
 const version='20261017-logo2';
+const brandingVersion='20261017-safari3';
 (async()=>{
   const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
   const page=await browser.newPage({viewport:{width:1280,height:900}}),errors=[];
@@ -17,8 +18,13 @@ const version='20261017-logo2';
   const imageSize=src=>page.evaluate(async src=>{const img=new Image();img.src=src;await img.decode();return [img.naturalWidth,img.naturalHeight];},src);
   const universalIcons=async()=>{
     const apple=page.locator('link[rel="apple-touch-icon"]');
-    assert.equal(await apple.getAttribute('href'),`icons/gallery-180.png?v=${version}`);
+    assert.equal(await apple.getAttribute('href'),'apple-touch-icon.png');
+    assert.equal(await apple.getAttribute('sizes'),'180x180');
     assert.deepEqual(await imageSize(await apple.getAttribute('href')),[180,180]);
+    const precomposed=page.locator('link[rel="apple-touch-icon-precomposed"]');
+    assert.equal(await precomposed.getAttribute('href'),'apple-touch-icon-precomposed.png');
+    assert.equal(await precomposed.getAttribute('sizes'),'180x180');
+    assert.deepEqual(await imageSize(await precomposed.getAttribute('href')),[180,180]);
     assert.equal(await page.locator('link[rel="manifest"]').getAttribute('href'),`manifest.webmanifest?v=${version}`);
     const manifest=await page.evaluate(async()=>{
       const response=await fetch(document.querySelector('link[rel="manifest"]').href);
@@ -38,16 +44,20 @@ const version='20261017-logo2';
     assert.equal(await page.locator('#brandIcon img').getAttribute('src'),'icons/gallery-192.png');
     assert.deepEqual(await imageSize('icons/gallery-192.png'),[192,192]);
     const favicon=page.locator('link[rel="icon"]');
-    assert.equal(await favicon.getAttribute('href'),`favicon.ico?v=${version}`);
-    assert.equal(await favicon.getAttribute('type'),'image/x-icon');
-    assert.equal(await favicon.getAttribute('sizes'),'16x16 32x32 48x48');
-    const dimensions=await imageSize(await favicon.getAttribute('href'));
-    assert.ok([16,32,48].includes(dimensions[0])&&dimensions[0]===dimensions[1]);
+    assert.equal(await favicon.count(),1);
+    assert.equal(await favicon.getAttribute('href'),'site-icon-20261017.png');
+    assert.equal(await favicon.getAttribute('type'),'image/png');
+    assert.equal(await favicon.getAttribute('sizes'),'180x180');
+    assert.deepEqual(await imageSize(await favicon.getAttribute('href')),[180,180]);
   };
   try{
     await page.goto('https://gallery.test/');assert.equal(await page.title(),'갤러리');
     await defaultIcons();await universalIcons();
-    assert.equal(await page.locator('script[src^="branding.js"]').getAttribute('src'),`branding.js?v=${version}`);
+    assert.equal(await page.locator('script[src^="branding.js"]').getAttribute('src'),`branding.js?v=${brandingVersion}`);
+    for(const asset of ['site-icon-20261017.png','apple-touch-icon.png','apple-touch-icon-precomposed.png']){
+      assert.deepEqual(fs.readFileSync(path.join(root,asset)),fs.readFileSync(path.join(root,'icons/gallery-180.png')),`${asset} must match source PNG`);
+      assert.deepEqual(await imageSize(asset),[180,180]);
+    }
     for(const size of [32,180,192,512])assert.deepEqual(await imageSize(`icons/gallery-${size}.png`),[size,size]);
     assert.deepEqual(await imageSize('favicon.svg'),[192,192]);
     const svg=fs.readFileSync(path.join(root,'favicon.svg'),'utf8');
@@ -68,7 +78,7 @@ const version='20261017-logo2';
     assert.deepEqual(icoSizes.sort((a,b)=>a-b),[16,32,48]);
     // Chromium does not expose bare /favicon.ico to this routed fixture (even
     // fetch fails before route/requestfailed). Decode the exact root file bytes;
-    // defaultIcons separately decodes the production versioned URL. Verify bare
+    // defaultIcons separately decodes the public PNG URL. Verify bare
     // root HTTP status, MIME and byte hash against deployment outside this fixture.
     const legacyIco=await imageSize('data:image/x-icon;base64,'+ico.toString('base64'));
     assert.ok([16,32,48].includes(legacyIco[0])&&legacyIco[0]===legacyIco[1]);
@@ -144,6 +154,80 @@ const version='20261017-logo2';
     await page.waitForFunction(()=>window.resumeWrites.length===1&&!pendingSaves.has('u:icon'));
     assert.ok((await page.evaluate(()=>window.resumeWrites[0].url)).includes('account-b-metadata'));
     assert.equal(await page.evaluate(()=>window.resumeWrites[0].body.settings.icon),await page.evaluate(()=>window.bIcon));
-    assert.deepEqual(errors,[]);console.log('PASS versioned ICO favicon (16/32/48 PNG entries), legacy SVG replacement PNG, legacy/new icon decode, versioned apple/manifest/branding, viewport metadata, desktop shared sticky/dynamic height, mobile behavior, logo file chooser, 256px PNG/favicon, settings persistence, logout reset/account isolation');
+    const safariContext=await browser.newContext({
+      userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+      viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+    });
+    try{
+      const safari=await safariContext.newPage(),safariErrors=[];
+      safari.setDefaultTimeout(5000);safari.on('pageerror',e=>safariErrors.push(e.message));
+      await safariContext.route('**/*',async route=>{
+        const u=new URL(route.request().url()),prefix='/drive-gallery/';
+        if(u.hostname!=='gallery.test'||!u.pathname.startsWith(prefix))return route.abort();
+        const relative=u.pathname.slice(prefix.length)||'index.html';
+        const file=path.resolve(root,relative);
+        if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.fulfill({status:404,body:''});
+        const contentType={'.js':'application/javascript','.png':'image/png','.ico':'image/x-icon','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'}[path.extname(file)]||'text/html; charset=utf-8';
+        return route.fulfill({contentType,body:fs.readFileSync(file)});
+      });
+      const safariMetadata=async()=>{
+        const favicon=safari.locator('link[rel="icon"]');
+        assert.equal(await favicon.count(),1);
+        assert.equal(await favicon.getAttribute('href'),'site-icon-20261017.png');
+        assert.equal(await favicon.getAttribute('type'),'image/png');
+        assert.equal(await favicon.getAttribute('sizes'),'180x180');
+        for(const [rel,asset] of [['icon','site-icon-20261017.png'],['apple-touch-icon','apple-touch-icon.png'],['apple-touch-icon-precomposed','apple-touch-icon-precomposed.png']]){
+          assert.equal(await safari.locator(`link[rel="${rel}"]`).getAttribute('sizes'),'180x180');
+          const metadata=await safari.evaluate(async rel=>{
+            const link=document.querySelector(`link[rel="${rel}"]`),response=await fetch(link.href);
+            const img=new Image();img.src=link.href;await img.decode();
+            return {url:link.href,status:response.status,type:response.headers.get('content-type'),size:[img.naturalWidth,img.naturalHeight],bytes:Array.from(new Uint8Array(await response.arrayBuffer()))};
+          },rel);
+          assert.equal(metadata.url,`https://gallery.test/drive-gallery/${asset}`);
+          assert.equal(metadata.status,200);assert.equal(metadata.type,'image/png');
+          assert.deepEqual(metadata.size,[180,180]);
+          assert.deepEqual(Buffer.from(metadata.bytes),fs.readFileSync(path.join(root,'icons/gallery-180.png')));
+        }
+      };
+      await safari.goto('https://gallery.test/drive-gallery/');await safariMetadata();
+      await safari.evaluate(value=>{
+        token='safari-account';gallery={videos:{},settings:{icon:value}};
+        window.savedChanges=[];flushSaves=async()=>{window.savedChanges.push(...pendingSaves);pendingSaves.clear();};
+        Branding.apply(gallery.settings.icon);
+      },value);
+      assert.equal(await safari.locator('#brandIcon img').getAttribute('src'),value);
+      await safariMetadata();
+      const safariChooser=safari.waitForEvent('filechooser');await safari.locator('#siteLogo').click();
+      await (await safariChooser).setFiles({name:'safari-icon.png',mimeType:'image/png',buffer:fs.readFileSync(path.join(root,'icons/gallery-180.png'))});
+      await safari.waitForFunction(old=>gallery.settings.icon!==old,value);
+      const uploaded=await safari.evaluate(()=>gallery.settings.icon);
+      assert.ok(uploaded.startsWith('data:image/png;base64,'));
+      assert.equal(await safari.locator('#brandIcon img').getAttribute('src'),uploaded);
+      assert.ok(await safari.evaluate(()=>window.savedChanges.some(([k])=>k==='u:icon')));
+      await safariMetadata();
+      await safari.evaluate(()=>showLoggedOut());
+      assert.equal(await safari.locator('#brandIcon img').getAttribute('src'),'icons/gallery-192.png');
+      await safariMetadata();assert.deepEqual(safariErrors,[]);
+    }finally{await safariContext.close();}
+    const edgeContext=await browser.newContext({userAgent:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/130.0.2849.68 Version/18.0 Mobile/15E148 Safari/605.1.15'});
+    try{
+      const edge=await edgeContext.newPage(),edgeErrors=[];
+      edge.on('pageerror',e=>edgeErrors.push(e.message));
+      await edgeContext.route('**/*',async route=>{
+        const u=new URL(route.request().url());if(u.hostname!=='gallery.test')return route.abort();
+        const file=path.resolve(root,'.'+(u.pathname==='/'?'/index.html':u.pathname));
+        if(!file.startsWith(root+path.sep)||!fs.existsSync(file))return route.fulfill({status:404,body:''});
+        const contentType={'.js':'application/javascript','.png':'image/png','.ico':'image/x-icon','.svg':'image/svg+xml','.webmanifest':'application/manifest+json'}[path.extname(file)]||'text/html; charset=utf-8';
+        return route.fulfill({contentType,body:fs.readFileSync(file)});
+      });
+      await edge.goto('https://gallery.test/');
+      await edge.evaluate(value=>Branding.apply(value),value);
+      assert.equal(await edge.locator('#brandIcon img').getAttribute('src'),value);
+      assert.equal(await edge.locator('link[rel="icon"]').getAttribute('href'),value);
+      assert.equal(await edge.locator('link[rel="icon"]').getAttribute('type'),'image/png');
+      assert.equal(await edge.locator('link[rel="icon"]').getAttribute('sizes'),null);
+      assert.deepEqual(edgeErrors,[]);
+    }finally{await edgeContext.close();}
+    assert.deepEqual(errors,[]);console.log('PASS public PNG180 favicon/apple/precomposed assets, unchanged logo2 manifest, safari3 branding, legacy ICO/SVG decode, Chrome/Edge iOS custom favicon, iPhone Safari UA subpath account apply/upload/logout static favicon and custom header, viewport/sticky layout, settings persistence/account isolation (Chromium fixture; native Safari icon UI not tested)');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
