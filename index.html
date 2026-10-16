@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>드라이브 영상 갤러리</title>
+<title>갤러리</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
   :root {
@@ -20,11 +20,17 @@
   button:hover, .btn:hover { border-color: var(--dim); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
   button:disabled { opacity: .5; cursor: default; }
-  /* 위쪽 헤더(제목·수정·로그아웃)는 따라오지 않고 페이지 맨 위에 그대로 — 따라오는 건 카테고리 바만 */
+  /* PC는 헤더와 카테고리 바가 함께 따라오고, 모바일은 카테고리 바만 고정 */
   header { position: relative; z-index: 5; background: rgba(17,19,23,.92);
     border-bottom: 1px solid var(--line); padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
     display: flex; gap: 12px; align-items: center; }
+  @media (min-width: 641px) {
+    header { position: sticky; top: 0; z-index: 5; }
+  }
   header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #siteLogo { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; font-weight: 600; }
+  #brandIcon { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; font-size: 25px; flex: none; }
+  #brandIcon img { width: 100%; height: 100%; object-fit: contain; }
   #crumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; white-space: nowrap; color: var(--dim); }
   #crumbs a { color: var(--dim); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
   #crumbs a:last-child { color: var(--text); font-weight: 600; }
@@ -159,6 +165,7 @@
   #catbar { display: flex; flex-wrap: wrap; align-items: center; position: sticky; top: 0; z-index: 4; width: 100%; box-sizing: border-box;
     background: rgba(17,19,23,.95); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
   #catbar[hidden] { display: none; }
+  @media (min-width: 641px) { #catbar { top: var(--header-h, 0px); } }
   .catscroll { display: flex; gap: 6px; align-items: center; padding: 8px 16px; max-width: 100%; box-sizing: border-box;
     overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: none; }
   .catscroll::-webkit-scrollbar { display: none; }
@@ -349,7 +356,8 @@
 </head>
 <body>
 <header>
-  <h1>🎬 영상 갤러리</h1>
+  <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon">🍑</span><span>갤러리</span></button></h1>
+  <input id="brandFile" type="file" accept="image/*" hidden>
   <div id="crumbs"></div>
   <span id="saveState"></span>
   <span id="titleProgress" role="status" aria-live="polite" hidden></span>
@@ -405,6 +413,7 @@
 <script src="series-ui.js"></script>
 <script src="title-editor.js"></script>
 <script src="directory-thumbs.js"></script>
+<script src="branding.js"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -517,6 +526,7 @@ setInterval(() => { if (token && Date.now() > tokenExp) markExpired(); }, 30000)
 
 function showLoggedOut(msg) {
   SeriesUI.leave();
+  Branding.logout();
   token = null;
   delete $('#authBtn').dataset.expired;
   $('#authBtn').className = '';
@@ -608,7 +618,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -637,11 +647,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -925,8 +935,12 @@ function setHidden(f, on) {
 }
 
 async function loadGallery() {
-  ({ fileId: galleryFileId, data: gallery } = await readRemote());
+  const session = Branding.session;
+  const remote = await readRemote();
+  if (session !== Branding.session) return;
+  ({ fileId: galleryFileId, data: gallery } = remote);
   applyChanges(gallery, pendingSaves); // 아직 저장 중인 변경은 화면에 그대로 유지
+  Branding.apply(gallery.settings && gallery.settings.icon);
   for (const [id, v] of Object.entries(gallery.videos)) if (isInline(v) && !pendingSaves.has(id)) migrateQueue.add(id);
 }
 
@@ -941,6 +955,7 @@ function saveEntry(fileId, entry) {
 // 대기 중인 변경을 한 번에 모아 저장. 저장 중에 새로 들어온 변경은 끝난 뒤 이어서 저장.
 async function flushSaves() {
   if (saving || (!pendingSaves.size && !migrateQueue.size)) return renderSaveState();
+  const session = Branding.session;
   saving = true;
   clearTimeout(retryTimer);
   renderSaveState();
@@ -949,6 +964,7 @@ async function flushSaves() {
   const batch = new Map([...pendingSaves].filter(([, v]) => !isInline(v) || ++n <= THUMB_BATCH));
   try {
     const { fileId, data } = await readRemote(); // 다른 기기에서 바뀐 내용을 덮어쓰지 않도록 최신본 위에 반영
+    if (session !== Branding.session) return;
     // 옛 방식(이미지 통째) 항목은 파일로 옮김 — 다른 기기의 옛 화면이 넣은 것도. 그새 바뀐 항목은 건너뜀
     for (const [id, v] of Object.entries(data.videos)) if (isInline(v) && !pendingSaves.has(id)) migrateQueue.add(id);
     for (const id of migrateQueue) if (pendingSaves.has(id) || !isInline(data.videos[id])) migrateQueue.delete(id);
@@ -957,13 +973,16 @@ async function flushSaves() {
     const changes = new Map(batch), used = [];
     const jobs = [...batch].filter(([, v]) => isInline(v)).concat(migrate.map(id => [id, data.videos[id]]));
     await pool(jobs, 4, async ([id, v]) => {
+      if (session !== Branding.session) return;
       changes.set(id, { t: v.t, at: v.at, file: await uploadThumb(id, v) });
       used.push(thumbKey(id, v));
     });
+    if (session !== Branding.session) return;
     applyChanges(data, changes);
     const body = JSON.stringify(data);
     if (fileId) {
       const up = await (await api(`${UPLOAD}/files/${fileId}?uploadType=media&fields=md5Checksum`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body })).json();
+      if (session !== Branding.session) return;
       cachePut(up.md5Checksum, data); // 방금 올린 내용 = 다음에 읽을 내용
       galleryFileId = fileId;
     } else {
@@ -971,6 +990,7 @@ async function flushSaves() {
       form.append('metadata', new Blob([JSON.stringify({ name: GALLERY_NAME, parents: ['appDataFolder'] })], { type: 'application/json' }));
       form.append('file', new Blob([body], { type: 'application/json' }));
       const up = await (await api(`${UPLOAD}/files?uploadType=multipart&fields=id,md5Checksum`, { method: 'POST', body: form })).json();
+      if (session !== Branding.session) return;
       galleryFileId = up.id;
       cachePut(up.md5Checksum, data);
     }
@@ -984,6 +1004,7 @@ async function flushSaves() {
     }
     saveError = '';
   } catch (e) {
+    if (session !== Branding.session) return;
     if (e instanceof AuthError) {
       saveError = '로그인 시간이 끝나 저장을 멈췄어요. 위쪽 🔑 다시 로그인을 누르면 이어서 저장해요.';
     } else {
@@ -992,6 +1013,7 @@ async function flushSaves() {
     }
   } finally {
     saving = false;
+    if (session !== Branding.session && token && pendingSaves.has('u:icon')) queueMicrotask(flushSaves);
   }
   if (!saveError && (pendingSaves.size || migrateQueue.size)) return flushSaves();
   renderSaveState();
@@ -1469,10 +1491,21 @@ function closeSearch() {
   renderGrid();
 }
 
-// 화면 위에 붙어 있는 높이 = 카테고리 바 (헤더는 페이지 맨 위에 남고 따라오지 않음)
-function stickyHeight() { return $('#catbar').hidden ? 0 : $('#catbar').offsetHeight; }
-function updateSticky() { document.documentElement.style.setProperty('--sticky-h', stickyHeight() + 'px'); }
+// PC는 헤더 + 카테고리 바, 모바일은 카테고리 바 높이만 반영
+function stickyHeight() {
+  const headerHeight = matchMedia('(min-width: 641px)').matches ? document.querySelector('header').offsetHeight : 0;
+  return headerHeight + ($('#catbar').hidden ? 0 : $('#catbar').offsetHeight);
+}
+function updateSticky() {
+  document.documentElement.style.setProperty('--header-h', document.querySelector('header').offsetHeight + 'px');
+  document.documentElement.style.setProperty('--sticky-h', stickyHeight() + 'px');
+  if (menu.open) placeMenu();
+}
 addEventListener('resize', updateSticky);
+const stickyResizeObserver = new ResizeObserver(updateSticky);
+stickyResizeObserver.observe(document.querySelector('header'));
+stickyResizeObserver.observe($('#catbar'));
+updateSticky();
 
 function videoCard(f, counts = tagCounts()) {
   const custom = gallery.videos[f.id];
