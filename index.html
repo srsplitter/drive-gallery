@@ -134,7 +134,9 @@
   .memo textarea:focus { outline: none; border-color: var(--accent); }
   .memo .done { position: absolute; right: 8px; bottom: 10px; padding: 4px 12px; font-size: 13px; }
   .tag-add { display: grid; gap: 6px; }
-  #bulkTag { margin: 4px 0 88px; } /* 목록 맨 아래 태그 메모 (아래 ☰ 버튼에 안 가리게 여백) */
+  #bulkTag { margin: 32px 0 88px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } /* 목록과 메모 사이 여백, 아래 ☰ 버튼 가림 방지 */
+  @media (max-width: 640px) { #bulkTag { grid-template-columns: 1fr; } }
+  #bulkTag > .m-sec { align-content: start; }
   #bulkTag textarea { min-height: 64px; }
   .tag-box { display: grid; gap: 10px; }
   .all-tags > b { font-size: 12px; color: var(--dim); font-weight: 600; }
@@ -1909,7 +1911,7 @@ async function renameVideo(f, name) {
 
 // 태그 메모 칸 공통: Enter = submit (한글 조합 중에 누른 Enter 는 글자가 확정된 뒤),
 // 띄어쓰기 = 쉼표: "게임 4k" → "게임, 4k" (조합 중엔 건드리지 않음)
-function memoKeys(ta, submit) {
+function memoKeys(ta, submit, { splitSpaces = true } = {}) {
   let enterPending = false;
   ta.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || e.shiftKey) return;
@@ -1918,7 +1920,7 @@ function memoKeys(ta, submit) {
   });
   ta.addEventListener('compositionend', () => { if (enterPending) { enterPending = false; setTimeout(submit); } });
   ta.addEventListener('input', e => {
-    if (e.isComposing) return;
+    if (!splitSpaces || e.isComposing) return;
     const v = ta.value, at = ta.selectionStart;
     const fix = s => s.replace(/([^,\s]) +/g, '$1, ').replace(/, {2,}/g, ', ').replace(/,{2,}/g, ',');
     const next = fix(v);
@@ -1932,24 +1934,63 @@ function memoKeys(ta, submit) {
 // ---------- 목록 맨 아래 태그 메모 (수정 ON): 지금 화면에 보이는 영상 전부에 태그 붙이기 ----------
 const bulkTa = el('textarea', { placeholder: '태그를 쉼표로 구분해 적고 Enter → 지금 보이는 영상 모두에 붙음' });
 const bulkDone = el('button', { className: 'primary done' });
-function renderBulk() { bulkDone.textContent = `보이는 영상 ${shown.length}개에 붙이기`; }
+const bulkRemoveTa = el('textarea', { ariaLabel: '보이는 영상에서 태그 제거', placeholder: '제거할 태그 이름을 쉼표로 구분해 적고 Enter' });
+const bulkRemoveDone = el('button', { className: 'primary done' });
+function renderBulk() {
+  bulkDone.textContent = `보이는 영상 ${shown.length}개에 붙이기`;
+  bulkRemoveDone.textContent = `보이는 영상 ${shown.length}개에서 제거`;
+}
 bulkDone.onclick = () => {
+  bulkTa.focus({ preventScroll: true });
+  if (!document.body.classList.contains('editing') || currentView) return;
   const typed = parseTags(bulkTa.value);
   if (!typed.length || !shown.length) return;
-  for (const f of shown) { // 한 번에 모아 저장
+  const targets = [...shown];
+  let n = 0;
+  for (const f of targets) { // 한 번에 모아 저장
     const next = [...new Set([...tagsOf(f), ...typed])];
     if (next.length === tagsOf(f).length) continue;
     gallery.tags[f.id] = next;
     pendingSaves.set('t:' + f.id, next);
+    n++;
   }
-  const n = shown.length;
   bulkTa.value = '';
   renderGrid();
   flushSaves();
   setStatus(`보이는 영상 ${n}개에 태그 ${typed.map(t => `(${t})`).join(' ')} 를 붙였어요.`);
 };
+bulkRemoveDone.onclick = () => {
+  bulkRemoveTa.focus({ preventScroll: true });
+  if (!document.body.classList.contains('editing') || currentView) return;
+  const typed = parseTags(bulkRemoveTa.value);
+  if (!typed.length || !shown.length) return;
+  const targets = [...shown];
+  let n = 0;
+  for (const f of targets) {
+    const have = tagsOf(f), next = have.filter(t => !typed.includes(t));
+    if (next.length === have.length) continue;
+    if (next.length) gallery.tags[f.id] = next;
+    else delete gallery.tags[f.id];
+    pendingSaves.set('t:' + f.id, next.length ? next : null);
+    n++;
+  }
+  bulkRemoveTa.value = '';
+  renderGrid();
+  flushSaves();
+  setStatus(`보이는 영상 ${n}개에서 태그 ${typed.map(t => `(${t})`).join(' ')} 를 제거했어요.`);
+};
 memoKeys(bulkTa, () => bulkDone.click());
-$('#bulkTag').append(el('div', { className: 'memo' }, bulkTa, bulkDone));
+memoKeys(bulkRemoveTa, () => bulkRemoveDone.click(), { splitSpaces: false });
+for (const ta of [bulkTa, bulkRemoveTa]) ta.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  (ta === bulkTa ? bulkRemoveTa : bulkTa).focus({ preventScroll: true });
+});
+$('#bulkTag').append(
+  el('div', { className: 'm-sec' }, el('b', { textContent: '보이는 영상에 추가' }), el('div', { className: 'memo' }, bulkTa, bulkDone)),
+  el('div', { className: 'm-sec' }, el('b', { textContent: '보이는 영상에서 제거' }),
+    el('div', { className: 'memo' }, bulkRemoveTa, bulkRemoveDone),
+    el('p', { className: 'hint', textContent: '일반·카테고리·캐릭터·장르 등 모든 종류의 태그를 이름이 정확히 일치할 때만 제거합니다.' })));
 
 // ---------- 영상 창의 태그 칸 ----------
 // 위: 이 영상의 알약들 (+ = 하나 추가(다른 영상 태그를 많은 순으로 추천), 수정 = 전체를 메모 칸에 펼쳐 고치기)

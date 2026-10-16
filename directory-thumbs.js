@@ -85,7 +85,9 @@ const DirectoryThumbs = (() => {
     wrap.append(button);
     if (editing() && expanded === key) {
       const choices = el('div', { className: 'cover-candidates' });
-      for (const f of candidates) {
+      const selected = candidates.find(f => f.id === coverId);
+      const choicesInOrder = selected ? [selected, ...candidates.filter(f => f.id !== coverId)] : candidates;
+      for (const f of choicesInOrder) {
         const candidate = el('button', { className: 'cover-candidate' + (f.id === coverId ? ' selected' : ''),
           title: f.name, ariaLabel: '대표 이미지 선택: ' + f.name,
           onclick: e => {

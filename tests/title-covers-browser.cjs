@@ -83,6 +83,7 @@ const root=path.resolve(__dirname,'..');
     await dir().locator('.pill .cover-thumb').click();
     assert.deepEqual(await choices().locator('.cover-candidate').evaluateAll(ns=>ns.map(n=>n.dataset.videoId)),['a','b','c']);
     await choices().locator('.cover-candidate[data-video-id="c"]').click();
+    assert.deepEqual(await choices().locator('.cover-candidate').evaluateAll(ns=>ns.map(n=>n.dataset.videoId)),['c','a','b']);
     assert.equal(await page.evaluate(()=>gallery.covers['tag:게임']),'c');
     assert.equal(await page.locator('#viewer').evaluate(n=>n.open),false);
     const width=await dir().locator('.cover-thumb').first().evaluate(n=>n.getBoundingClientRect().width);

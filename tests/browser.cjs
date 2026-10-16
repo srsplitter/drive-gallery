@@ -35,7 +35,7 @@ const root = path.resolve(__dirname, '..');
     assert.deepEqual(await page.locator('#favoriteVideos .card').evaluateAll(ns => ns.map(n => n.dataset.id)), ['e']);
     assert.equal(await page.locator('#grid .card').count(),6);
     assert.deepEqual(await page.evaluate(()=>shown.map(f=>f.id)),['b','a','c','e','d']);
-    assert.ok((await page.locator('#bulkTag button').textContent()).includes('5'));
+    assert.ok((await page.locator('#bulkTag button').first().textContent()).includes('5'));
     await page.locator('#favoriteVideos .card[data-id="e"] .thumb').click();
     await page.getByRole('button',{name:'이전 영상',exact:true}).click();assert.equal(await page.locator('#vTitle').textContent(),'c.mp4');
     await page.getByRole('button',{name:'다음 영상',exact:true}).click();assert.equal(await page.locator('#vTitle').textContent(),'e.mp4');
