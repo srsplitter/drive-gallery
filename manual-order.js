@@ -102,6 +102,15 @@ const ManualOrderUI = (() => {
     gallery.order = {}; randomRank = null;
     renderGrid(); flushSaves();
   }
+  function autoSort() {
+    if (!token || currentView || SeriesUI.mode) return;
+    if (gallery.order && Object.hasOwn(gallery.order, 'regular')) {
+      delete gallery.order.regular;
+      pendingSaves.set('o:regular', null);
+    }
+    randomRank = null;
+    renderGrid(); flushSaves();
+  }
   const owner = id => Object.keys(gallery.series || {}).find(key => (gallery.series[key].videoIds || []).includes(id));
   function clearIndicators() {
     document.querySelectorAll('.order-before,.order-after,.order-dragging').forEach(card =>
@@ -177,5 +186,5 @@ const ManualOrderUI = (() => {
       e.preventDefault(); e.stopImmediatePropagation(); suppressClickUntil = 0;
     }
   }, true);
-  return { sorted, bind, restore };
+  return { sorted, bind, restore, autoSort };
 })();

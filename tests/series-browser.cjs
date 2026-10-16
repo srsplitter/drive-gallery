@@ -24,7 +24,7 @@ const root=path.resolve(__dirname,'..');
       $('#setup').hidden=true;$('#editBtn').hidden=false;$('#authBtn').hidden=false;
       setEditMode(true);renderGrid();
     });
-    assert.deepEqual(await page.locator('#catbar .catscroll .chip').allTextContents(),['🔍','태그','카테고리','장르','캐릭터','시리즈','타이틀']);
+    assert.deepEqual(await page.locator('#catbar .catscroll .chip').allTextContents(),['🔍','태그','장르','캐릭터','시리즈','타이틀']);
     const assign=()=>page.locator('#catbar').getByRole('button',{name:'시리즈 지정',exact:true});
     const save=()=>page.locator('#catbar').getByRole('button',{name:'저장',exact:true});
     const card=id=>page.locator('#grid .card[data-id="'+id+'"]');

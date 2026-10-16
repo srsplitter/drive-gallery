@@ -2,13 +2,21 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { sortVideos, compareText } = require('../gallery-order.js');
 const f = (id, name = id) => ({ id, name });
-test('favorites, popular character, category, then tag count', () => {
+test('favorites, popular character, numbered family, then category', () => {
   const list = ['film','luigi','mario1','mario2','mario3','plain','none','fav'].map(x => f(x));
   const gallery = { loved: { fav: true }, tagKinds: { 게임: 'category', 영화: 'category', 마리오: 'character', 루이지: 'character' }, tags: {
     film: ['영화'], luigi: ['게임','루이지','많음','추가'], mario1: ['게임','마리오'],
     mario2: ['게임','마리오','버섯'], mario3: ['게임','마리오','버섯','불꽃'], plain: ['일반'], fav: [],
   } };
-  assert.deepEqual(sortVideos(list, gallery).map(x => x.id), ['fav','mario3','mario2','mario1','luigi','film','plain','none']);
+  assert.deepEqual(sortVideos(list, gallery).map(x => x.id), ['fav','mario1','mario2','mario3','luigi','film','plain','none']);
+});
+
+test('ordinary titles within same parent and category retain descending tag count', () => {
+  const list = [f('one', 'Alpha'), f('two', 'Beta'), f('three', 'Gamma')];
+  const gallery = { tagKinds: { G:'genre', C:'character', K:'category' }, tags: {
+    one:['G','C','K'], two:['G','C','K','x'], three:['G','C','K','x','y'],
+  } };
+  assert.deepEqual(sortVideos(list, gallery).map(x => x.id), ['three','two','one']);
 });
 test('equal tag counts cluster overlap before alphabetical fallback', () => {
   const list = ['c','b','a'].map(x => f(x));
@@ -88,4 +96,95 @@ test('primary category uses popularity within genre and primary character, from 
   const before = JSON.stringify({list, universe, gallery});
   assert.deepEqual(sortVideos(list, gallery, universe).map(x => x.id), ['multi','a','b']);
   assert.equal(JSON.stringify({list, universe, gallery}), before);
+});
+
+function fixture(rows, tagKinds = {}, loved = {}) {
+  const files = rows.map(([id, name]) => ({ id, name }));
+  const gallery = { tags: Object.fromEntries(rows.map(([id, , tags = []]) => [id, tags])), tagKinds, loved };
+  return { files, gallery, order: (list = files, universe = files) => sortVideos(list, gallery, universe).map(f => f.id) };
+}
+
+test('families precede ordinary titles; stem then numeric index precede category and tag count', () => {
+  const f = fixture([
+    ['ten', 'Mario10.mp4', ['rare']],
+    ['two', 'mario2.MP4', ['popular', 'x', 'y']],
+    ['one', 'Ｍａｒｉｏ１.mp4', ['rare']],
+    ['ordinary', 'AAA.mp4', ['popular']],
+    ['zelda', 'Zelda2.mp4', ['popular']],
+    ['zelda1', 'Zelda1.mp4', ['rare']],
+  ], { rare: 'category', popular: 'category' });
+  assert.deepEqual(f.order(), ['one', 'two', 'ten', 'zelda1', 'zelda', 'ordinary']);
+  assert.deepEqual(f.order([...f.files].reverse()), f.order());
+});
+
+test('genre and character popularity remain above families; category popularity remains within parent', () => {
+  const f = fixture([
+    ['g1', 'Zulu1.mp4', ['G', 'C', 'popular']],
+    ['g2', 'Zulu2.mp4', ['G', 'C', 'rare']],
+    ['c', 'AAA.mp4', ['G', 'C', 'popular']],
+    ['cRare', '000.mp4', ['G', 'C', 'rare']],
+    ['cPopular', 'ZZZ.mp4', ['G', 'C', 'popular']],
+    ['d1', 'Alpha1.mp4', ['G', 'D']],
+    ['d2', 'Alpha2.mp4', ['G', 'D']],
+    ['h1', 'Alpha1.mp4', ['H', 'C']],
+    ['h2', 'Alpha2.mp4', ['H', 'C']],
+  ], { G: 'genre', H: 'genre', C: 'character', D: 'character', popular: 'category', rare: 'category' });
+  assert.deepEqual(f.order(), ['g1', 'g2', 'c', 'cPopular', 'cRare', 'd1', 'd2', 'h1', 'h2']);
+});
+
+test('digit-only, singleton, middle digits, and repeated numeric index do not form families', () => {
+  const f = fixture([
+    ['plain', 'AAA', ['hot']],
+    ['digits1', '1.mp4', ['cold']], ['digits2', '2.mp4', ['cold']],
+    ['single', 'Solo1.mp4', ['cold']],
+    ['middle1', 'Clip4K.mp4', ['cold']], ['middle2', 'Clip8K.mp4', ['cold']],
+    ['dup1', 'Same1.mp4', ['cold']], ['dup2', 'SAME01.mov', ['cold']],
+  ], { hot: 'category', cold: 'category' });
+  // A confirmed family would jump ahead of AAA despite category ranking.
+  const list = [f.files[0], ...f.files.slice(1)];
+  f.gallery.tags.plain = ['cold', 'extra'];
+  assert.equal(f.order(list)[0], 'plain');
+});
+
+test('same stem needs distinct indices in same primary genre and character', () => {
+  for (const kind of ['genre', 'character']) {
+    const f = fixture([
+      ['ordinary', 'AAA', ['A']], ['one', 'Mario1.mp4', ['A']], ['two', 'Mario2.mp4', ['B']],
+    ], { A: kind, B: kind });
+    assert.deepEqual(f.order(), ['ordinary', 'one', 'two']);
+  }
+});
+
+test('full universe confirms families for filtered and reversed lists', () => {
+  const f = fixture([
+    ['ordinary', 'AAA', ['tag']], ['one', 'Mario1.mp4', ['tag']], ['two', 'Mario2.mp4', ['tag']],
+  ]);
+  const filtered = [f.files[0], f.files[2]];
+  assert.deepEqual(f.order(filtered), ['two', 'ordinary']);
+  assert.deepEqual(f.order([...filtered].reverse(), [...f.files].reverse()), ['two', 'ordinary']);
+  assert.deepEqual(f.order(filtered, filtered), ['ordinary', 'two']);
+});
+
+test('tagless extensionless confirmed family follows hierarchy; ordinary tagless stay last', () => {
+  const f = fixture([
+    ['plain', 'AAA'], ['ten', '마리오10'], ['two', '마리오2'], ['one', '마리오1'],
+    ['tagged', 'ZZZ', ['tag']],
+  ]);
+  assert.deepEqual(f.order(), ['one', 'two', 'ten', 'tagged', 'plain']);
+});
+
+test('favorites keep title priority regardless of family or category', () => {
+  const f = fixture([
+    ['two', 'Mario2.mp4', ['tag']], ['one', 'Mario1.mp4'], ['plain', 'AAA'],
+    ['other', 'Other', ['tag']],
+  ], {}, { two: true, one: true, plain: true });
+  assert.deepEqual(f.order(), ['plain', 'one', 'two', 'other']);
+});
+
+test('similarity cannot move numeric members; duplicate indices allow category fallback', () => {
+  const f = fixture([
+    ['ten', 'Mario10.mp4', ['a', 'b']], ['two', 'Mario2.mp4', ['x', 'y']],
+    ['one', 'Mario1.mp4', ['a', 'b']], ['dup', 'Mario02.mp4', ['popular', 'x']],
+  ], { popular: 'category' });
+  assert.deepEqual(f.order(), ['one', 'dup', 'two', 'ten']);
 });

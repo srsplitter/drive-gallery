@@ -36,20 +36,47 @@
       const n = categoryCounts.get(key);
       for (const t of ts.filter(t => kinds[t] === 'category')) n.set(t, (n.get(t) || 0) + 1);
     }
+    const numberedTitle = f => {
+      const name = String(f.name || '').normalize('NFKC').trim().toLowerCase()
+        .replace(/\.(mp4|m4v|mov|webm|mkv|avi|wmv|flv|mpeg|mpg|3gp|ogv)$/i, '');
+      const match = /^(.*?)([0-9]+)$/.exec(name);
+      if (!match || !match[1].trim() || !/[^0-9\s]/.test(match[1])) return null;
+      return { stem: match[1].trim(), index: BigInt(match[2]) };
+    };
+    const familyKey = (f, number) => {
+      const genre = primaryGenre(f);
+      return JSON.stringify([genre, primaryCharacter(tags(f), genre), number.stem]);
+    };
+    const families = new Map();
+    for (const f of universe) {
+      const number = numberedTitle(f);
+      if (!number) continue;
+      const key = familyKey(f, number);
+      if (!families.has(key)) families.set(key, new Set());
+      families.get(key).add(number.index);
+    }
     const title = (a, b) => compareText(a.name, b.name) || compareText(a.id, b.id);
     const data = list.map(f => {
       const ts = tags(f), genre = primaryGenre(f), n = characterCounts.get(genre) || new Map();
       const char = primaryCharacter(ts, genre), cats = categoryCounts.get(categoryKey(genre, char)) || new Map();
       const cat = ts.filter(t => kinds[t] === 'category').sort((a, b) => (cats.get(b) || 0) - (cats.get(a) || 0) || compareText(a, b))[0] || '';
-      return { f, ts, genre, cat, char, catCount: cats.get(cat) || 0, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id] };
+      const number = numberedTitle(f);
+      const family = number && (families.get(familyKey(f, number)) || new Set()).size >= 2 ? number : null;
+      return { f, ts, genre, cat, char, family, catCount: cats.get(cat) || 0, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id] };
     });
-    const stage = d => d.loved ? 0 : d.ts.length ? 1 : 2;
+    const stage = d => d.loved ? 0 : d.ts.length || d.family ? 1 : 2;
+    const compareFamily = (a, b) => {
+      if (!a.family || !b.family) return a.family ? -1 : b.family ? 1 : 0;
+      return compareText(a.family.stem, b.family.stem)
+        || (a.family.index < b.family.index ? -1 : a.family.index > b.family.index ? 1 : 0);
+    };
     function hierarchy(a, b) {
       const s = stage(a) - stage(b);
       if (s) return s;
-      if (a.loved || !a.ts.length) return 0;
+      if (a.loved || stage(a) === 2) return 0;
       return (a.genre === b.genre ? 0 : !a.genre ? 1 : !b.genre ? -1 : ranked(a.genre, b.genre))
         || (a.char === b.char ? 0 : !a.char ? 1 : !b.char ? -1 : b.charCount - a.charCount || compareText(a.char, b.char))
+        || compareFamily(a, b)
         || (a.cat === b.cat ? 0 : !a.cat ? 1 : !b.cat ? -1 : b.catCount - a.catCount || compareText(a.cat, b.cat))
         || b.ts.length - a.ts.length;
     }

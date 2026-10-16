@@ -59,6 +59,11 @@
   #menuBtn i::before, #menuBtn i::after { content: ''; position: absolute; left: 0; }
   #menuBtn i::before { top: -6px; } #menuBtn i::after { top: 6px; }
   #catbar[hidden] ~ #menuBtn { display: none; }
+  #autoSortBtn { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20;
+    width: 52px; height: 52px; padding: 0; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); font-size: 13px; }
+  #catbar[hidden] ~ #autoSortBtn { display: none; }
+  #autoSortBtn[hidden] { display: none; }
   /* PC: 왼쪽에서 밀려 나오는 패널(어둡게 안 깔고 뒤 목록도 그대로 쓸 수 있음). 헤더 아래부터 화면 끝까지, 내용이 길면 안에서 스크롤 */
   #menu { position: fixed; left: 0; top: var(--menu-top, 0px); bottom: 0; height: auto; max-height: none; width: 360px;
     margin: 0; border-radius: 0 14px 14px 0; border-left: 0; z-index: 30; display: flex; flex-direction: column;
@@ -367,6 +372,7 @@
 </header>
 <nav id="catbar" hidden></nav>
 <button id="menuBtn" aria-label="메뉴 (검색·정렬)"><i></i></button>
+<button id="autoSortBtn" type="button" aria-label="자동 정렬" title="저장한 영상 배치를 풀고 장르 → 캐릭터 → 제목 번호 → 카테고리 → 태그 순으로 정렬" hidden>자동<br>정렬</button>
 <main>
   <section id="setup" class="notice" hidden>
     <h2>처음 설정</h2>
@@ -1098,6 +1104,7 @@ $('#menuClose').onclick = closeMenu;
 $('#menuReset').onclick = () => { menuDraft = null; filters = EMPTY_FILTERS(); renderGrid(); renderMenu(); };
 menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); }); // 폰: 바깥(어두운 곳) 누르면 닫힘
 $('#menuBtn').onclick = () => (menu.open && menu.classList.contains('in') ? closeMenu() : openMenu());
+$('#autoSortBtn').onclick = ManualOrderUI.autoSort;
 
 function renderMenu() {
   const editing = document.body.classList.contains('editing');
@@ -1286,6 +1293,7 @@ let showHidden = false;
 // 영상 그리드 또는 선택한 유형의 태그 디렉터리.
 function renderGrid() {
   thumbObserver.disconnect(); // 지난번 카드는 버려지므로 지켜보던 것도 놓음
+  $('#autoSortBtn').hidden = !token || !!currentView || SeriesUI.mode;
   const editing = document.body.classList.contains('editing');
   const hiddenCount = items.filter(isHidden).length;
   const visible = items.filter(f => !isHidden(f) || (showHidden && editing));
@@ -1348,7 +1356,7 @@ try {
 const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
 function directoryTabs() {
-  return [...directoryKinds, ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
+  return [...directoryKinds.filter(([kind]) => kind !== 'category'), ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
