@@ -1878,7 +1878,7 @@ async function trashVideo(f) {
 
 // ---------- 영상 이름 바꾸기 ----------
 // 수정 ON 에서 창 위쪽 이름을 누르면 입력칸으로 바뀜(확장자 앞까지 선택). Enter·다른 곳 클릭 = 저장, Esc = 취소.
-// 이름은 바로 바뀌어 보이고 드라이브 반영은 뒤에서. 실패하면 원래 이름으로.
+// 공통 제목 작업 큐에서 충돌을 조정하고, Drive PATCH 성공 후 이름을 표시한다.
 function startRename(f) {
   const title = $('#vTitle');
   if (title.querySelector('input')) return;
@@ -1894,7 +1894,6 @@ function startRename(f) {
     const name = input.value.trim();
     title.textContent = f.name;
     if (!save || !name || name === f.name) return;
-    if (!await ensureWriteScope()) return;
     renameVideo(f, name);
   };
   input.onkeydown = e => {
@@ -1929,7 +1928,6 @@ function startCardRename(f, nameEl) {
     cardRenaming = null;
     cardRenameEnded = Date.now();
     if (!save || !name || name === f.name) return;
-    if (!await ensureWriteScope()) return;
     renameVideo(f, name);
   };
   input.onkeydown = e => {
@@ -1940,20 +1938,10 @@ function startCardRename(f, nameEl) {
 }
 
 async function renameVideo(f, name) {
-  const old = f.name;
-  f.name = name;
-  renderGrid();
-  if (viewer.open && viewerFile === f) $('#vTitle').textContent = name;
-  try {
-    await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-  } catch (e) {
-    if (f.name === name) {
-      f.name = old;
-      renderGrid();
-      if (viewer.open && viewerFile === f && !$('#vTitle input')) $('#vTitle').textContent = old;
-    }
-    setStatus(`이름을 바꾸지 못했어요: ${e.message}`, true);
-  }
+  const result = await TitleEditor.submitRenames([{ file: f, name }]);
+  if (viewer.open && viewerFile === f && !$('#vTitle input')) $('#vTitle').textContent = f.name;
+  if (result && (result.failed || result.state === 'failed')) setStatus('이름을 바꾸지 못했어요. 제목 작업 상태를 확인해 주세요.', true);
+  return result;
 }
 
 // 태그 메모 칸 공통: Enter = submit (한글 조합 중에 누른 Enter 는 글자가 확정된 뒤),
@@ -2137,7 +2125,6 @@ function bracketTool() {
   let armed = false;
   btn.onclick = async () => {
     if (!armed) { armed = true; btn.textContent = `✅ ${todo.length}개 바꾸기 (한 번 더 누르면 시작)`; btn.className = 'primary'; return; }
-    if (!await ensureWriteScope()) return;
     menu.close();
     convertBrackets(todo);
   };
@@ -2152,26 +2139,13 @@ async function convertBrackets(list) {
     if (merged.length) { gallery.tags[f.id] = merged; pendingSaves.set('t:' + f.id, merged); }
   }
   flushSaves();
-  let done = 0, failed = 0, firstError = '';
-  for (const f of list) {
-    const { name } = splitBrackets(f.name);
-    setStatus(`제목 정리 중… ${done + failed + 1}/${list.length}`);
-    if (name === f.name) { done++; continue; }
-    try {
-      // 드라이브가 실제로 바꾼 이름을 돌려받아 확인
-      const r = await (await api(`${DRIVE}/files/${f.id}?fields=name`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })).json();
-      if (r.name !== name) throw new Error(`드라이브 이름이 "${r.name}" 그대로예요`);
-      f.name = name;
-      done++;
-    } catch (e) {
-      if (e instanceof AuthError) { renderGrid(); return handleError(e); }
-      failed++;
-      firstError = firstError || `"${f.name}": ${e.message}`;
-    }
-  }
-  renderGrid();
-  setStatus(failed ? `제목 정리: ${done}개 완료, ${failed}개는 이름을 못 바꿨어요(태그는 붙음). 첫 실패 — ${firstError}`
-    : `제목 정리 완료: ${done}개 (태그로 옮기고 [ ] 를 뺐어요).`, !!failed);
+  const draft = list.map(file => ({ file, name: splitBrackets(file.name).name }))
+    .filter(plan => plan.name !== plan.file.name);
+  const result = await TitleEditor.submitRenames(draft);
+  if (viewer.open && viewerFile && !$('#vTitle input')) $('#vTitle').textContent = viewerFile.name;
+  setStatus(result && (result.failed || result.state === 'failed')
+    ? '제목 정리 실패. 제목 작업 상태를 확인해 주세요(태그는 붙음).'
+    : '제목 정리 완료.', !!(result && result.failed));
 }
 
 // 브라우저는 화면 공유 권한을 저장하지 않으므로, 한 번 허용받은 공유를 페이지를 닫을 때까지 유지해
