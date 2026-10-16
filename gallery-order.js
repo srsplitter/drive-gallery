@@ -16,27 +16,41 @@
     const tags = f => [...new Set((gallery.tags || {})[f.id] || [])];
     const kinds = gallery.tagKinds || {}, counts = countTags(universe, gallery);
     const ranked = (a, b) => (counts.get(b) || 0) - (counts.get(a) || 0) || compareText(a, b);
-    const primaryCategory = f => tags(f).filter(t => kinds[t] === 'category').sort(ranked)[0] || '';
+    const primaryGenre = f => tags(f).filter(t => kinds[t] === 'genre').sort(ranked)[0] || '';
     const characterCounts = new Map();
     for (const f of universe) {
-      const cat = primaryCategory(f);
-      if (!characterCounts.has(cat)) characterCounts.set(cat, new Map());
-      const n = characterCounts.get(cat);
+      const genre = primaryGenre(f);
+      if (!characterCounts.has(genre)) characterCounts.set(genre, new Map());
+      const n = characterCounts.get(genre);
       for (const t of tags(f).filter(t => kinds[t] === 'character')) n.set(t, (n.get(t) || 0) + 1);
+    }
+    const primaryCharacter = (ts, genre) => {
+      const n = characterCounts.get(genre) || new Map();
+      return ts.filter(t => kinds[t] === 'character').sort((a, b) => (n.get(b) || 0) - (n.get(a) || 0) || compareText(a, b))[0] || '';
+    };
+    const categoryCounts = new Map();
+    const categoryKey = (genre, char) => JSON.stringify([genre, char]);
+    for (const f of universe) {
+      const ts = tags(f), genre = primaryGenre(f), key = categoryKey(genre, primaryCharacter(ts, genre));
+      if (!categoryCounts.has(key)) categoryCounts.set(key, new Map());
+      const n = categoryCounts.get(key);
+      for (const t of ts.filter(t => kinds[t] === 'category')) n.set(t, (n.get(t) || 0) + 1);
     }
     const title = (a, b) => compareText(a.name, b.name) || compareText(a.id, b.id);
     const data = list.map(f => {
-      const ts = tags(f), cat = primaryCategory(f), n = characterCounts.get(cat) || new Map();
-      const char = ts.filter(t => kinds[t] === 'character').sort((a, b) => (n.get(b) || 0) - (n.get(a) || 0) || compareText(a, b))[0] || '';
-      return { f, ts, cat, char, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id] };
+      const ts = tags(f), genre = primaryGenre(f), n = characterCounts.get(genre) || new Map();
+      const char = primaryCharacter(ts, genre), cats = categoryCounts.get(categoryKey(genre, char)) || new Map();
+      const cat = ts.filter(t => kinds[t] === 'category').sort((a, b) => (cats.get(b) || 0) - (cats.get(a) || 0) || compareText(a, b))[0] || '';
+      return { f, ts, genre, cat, char, catCount: cats.get(cat) || 0, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id] };
     });
-    const stage = d => d.loved ? 0 : d.cat ? 1 : d.char ? 2 : d.ts.length ? 3 : 4;
+    const stage = d => d.loved ? 0 : d.ts.length ? 1 : 2;
     function hierarchy(a, b) {
       const s = stage(a) - stage(b);
       if (s) return s;
       if (a.loved || !a.ts.length) return 0;
-      return (a.cat === b.cat ? 0 : !a.cat ? 1 : !b.cat ? -1 : ranked(a.cat, b.cat))
+      return (a.genre === b.genre ? 0 : !a.genre ? 1 : !b.genre ? -1 : ranked(a.genre, b.genre))
         || (a.char === b.char ? 0 : !a.char ? 1 : !b.char ? -1 : b.charCount - a.charCount || compareText(a.char, b.char))
+        || (a.cat === b.cat ? 0 : !a.cat ? 1 : !b.cat ? -1 : b.catCount - a.catCount || compareText(a.cat, b.cat))
         || b.ts.length - a.ts.length;
     }
     const signature = d => [...d.ts].sort(compareText);
