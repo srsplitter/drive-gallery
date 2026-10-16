@@ -29,12 +29,13 @@
     return next ? next + (removeExtension ? '' : extension) : null;
   }
 
-  const kindLabels = { normal: '태그', category: '카테고리', genre: '장르', character: '캐릭터', series: '시리즈' };
-  const queries = { normal: '', category: '', genre: '', character: '', series: '' };
+  const kindLabels = { title: '제목', normal: '태그', category: '카테고리', genre: '장르', character: '캐릭터', series: '시리즈' };
+  const queries = { title: '', normal: '', category: '', genre: '', character: '', series: '' };
   function matchesKinds(file, queries, data) {
     return Object.keys(kindLabels).every(kind => {
       const query = String(queries[kind] || '').trim().toLowerCase();
       if (!query) return true;
+      if (kind === 'title') return file.name.toLowerCase().includes(query);
       if (kind === 'series') return Object.values(data.series || {}).some(series =>
         series && Array.isArray(series.videoIds) && series.videoIds.includes(file.id)
         && String(series.name || '').toLowerCase().includes(query));
@@ -187,7 +188,7 @@
       input.type = 'text';
       input.value = queries[kind];
       input.placeholder = `${title} 검색`;
-      input.setAttribute('aria-label', `${title}로 동영상 검색`);
+      input.setAttribute('aria-label', kind === 'title' ? '제목으로 동영상 검색' : `${title}로 동영상 검색`);
       input.addEventListener('input', () => {
         queries[kind] = input.value;
         clearTimeout(searchTimer);

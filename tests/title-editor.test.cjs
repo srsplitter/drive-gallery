@@ -30,3 +30,9 @@ test('kind searches match only their own taxonomy and combine with series',()=>{
   assert.equal(matchesKinds(file,{character:'mario',category:'게임',series:'연작'},data),true);
   assert.equal(matchesKinds(file,{character:'mario',genre:'게임'},data),false);
 });
+test('title-specific query never matches tag names',()=>{
+  const file={id:'a',name:'Sample.MP4'},data={tags:{a:['Mario']}};
+  assert.equal(matchesKinds(file,{title:'mario'},data),false);
+  assert.equal(matchesKinds(file,{title:'sample'},data),true);
+  assert.equal(matchesKinds(file,{title:'sample',normal:'mario'},data),true);
+});

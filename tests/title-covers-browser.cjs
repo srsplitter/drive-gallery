@@ -167,6 +167,19 @@ const root=path.resolve(__dirname,'..');
     await base().fill('영화제목');await base().press('Enter');
     assert.equal(await page.evaluate(()=>items.find(f=>f.id==='d').name),'영화제목.mp4');
     assert.equal(await page.evaluate(()=>items.find(f=>f.id==='a').name),'a.mp4');
+    await clearKinds().click();
+    const titleQuery=()=>page.getByLabel('제목으로 동영상 검색',{exact:true});
+    await titleQuery().fill('Mario');await page.waitForTimeout(200);assert.deepEqual(await ids(),[]);
+    await titleQuery().fill('a.mp4');await page.waitForTimeout(200);assert.deepEqual(await ids(),['a']);
+    await field('캐릭터').fill('루이지');await page.waitForTimeout(200);assert.deepEqual(await ids(),[]);
+    await clearKinds().click();assert.deepEqual(await ids(),['e','a','b','c','d']);
+    for(const width of [390,1280]){
+      await page.setViewportSize({width,height:1000});
+      const rows=await page.locator('.title-kind-search input').evaluateAll(ns=>ns.map(n=>n.getBoundingClientRect().y));
+      assert.equal(rows.length,6);assert.ok(rows.slice(0,3).every(y=>Math.abs(y-rows[0])<2));
+      assert.ok(rows.slice(3).every(y=>Math.abs(y-rows[3])<2)&&rows[3]>rows[0]);
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    }
     assert.deepEqual(errors,[]);
     console.log('PASS title persistent search/manual order/filtered numbering/single rename/exclusions/whole-word removal and directory/series covers/cache/persistence/mobile');
   }finally{await browser.close();}
