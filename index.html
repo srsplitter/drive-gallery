@@ -1126,8 +1126,7 @@ function renderMenu() {
     sugg.replaceChildren(...list.map(t => pill(t, counts.get(t), {
       onclick: () => { draft.tags.push(t); tagIn.value = ''; drawTags(); },
       onStar: editing ? () => { toggleFav(t); drawTags(); } : null,
-      onRename: editing ? () => renderMenu() : null,
-      onDelete: editing ? () => { deleteTag(t); renderMenu(); } : null, confirm: true })));
+      onRename: editing ? () => renderMenu() : null })));
   };
   tagIn.oninput = drawTags;
   tagIn.onkeydown = e => {
