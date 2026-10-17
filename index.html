@@ -712,6 +712,12 @@ async function api(url, opts = {}) {
   if (!token || Date.now() > tokenExp) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
   const res = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
   if (res.status === 401) { markExpired(); throw new AuthError('로그인이 만료됐어요. 위쪽 🔑 다시 로그인을 눌러 주세요.'); }
+  if (res.ok && opts.method === 'PATCH' && url.startsWith(DRIVE + '/files/')) { // 드라이브 파일 이름 바꾸기 → [복원]용으로 이전 이름 기억
+    let name;
+    try { name = JSON.parse(opts.body).name; } catch {}
+    const id = decodeURIComponent(url.slice(DRIVE.length + 7).split('?')[0]), f = items.find(x => x.id === id);
+    if (name !== undefined && f && f.name !== name) undoNoteName(id, f.name);
+  }
   if (!res.ok) { // 드라이브가 알려 준 이유도 같이 (예: 403 insufficientPermissions)
     let why = '';
     try { const j = await res.json(); why = j.error && (j.error.message || (j.error.errors && j.error.errors[0] && j.error.errors[0].reason)) || ''; } catch {}
@@ -730,7 +736,70 @@ let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
+pendingSaves.set = function (key, val) { undoNote(key, val); return Map.prototype.set.call(this, key, val); }; // [복원]용으로 바뀌기 전 값을 기억
 let saving = false, saveError = '', retryTimer = null;
+
+// ---------- 되돌리기 ([복원] 버튼) ----------
+// 백업 파일 없이, 바뀌기 직전 값만 기억해 두었다가 반대로 적용 (페이지를 닫으면 사라짐).
+// 2초 넘게 쉬었다가 생긴 변경은 새 묶음 → [복원] 한 번에 가장 최근 묶음 하나씩 거꾸로. 태그·종류·즐겨찾기·별·숨김 등 + 드라이브 파일 이름
+const UNDO_KEYS = ['h:', 't:', 'f:', 'c:', 'x:', 'l:', 'k:', 'm:', 's:', 'o:', 'p:', 'n:'];
+const undoStack = []; // [{ gallery: Map(key → 이전 값/null), names: Map(파일 ID → 이전 이름) }]
+let undoShadow = null, undoLast = 0, undoing = false; // undoShadow: 마지막으로 아는 값 (바뀌기 직전 값을 꺼내는 곳)
+const undoCopy = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
+function undoGroup() {
+  if (!undoStack.length || Date.now() - undoLast > 2000) {
+    undoStack.push({ gallery: new Map(), names: new Map() });
+    if (undoStack.length > 30) undoStack.shift();
+  }
+  undoLast = Date.now();
+  return undoStack[undoStack.length - 1];
+}
+function undoNote(key, val) {
+  const m = CHANGE_MAPS[key.slice(0, 2)];
+  if (!undoShadow || !UNDO_KEYS.includes(key.slice(0, 2))) return;
+  const id = key.slice(2), map = undoShadow[m] || (undoShadow[m] = {});
+  if (!undoing) {
+    const g = undoGroup();
+    if (!g.gallery.has(key)) g.gallery.set(key, map[id] === undefined ? null : map[id]);
+  }
+  if (val || (m === 'order' && val === 0)) map[id] = undoCopy(val); else delete map[id];
+}
+function undoNoteName(id, from) {
+  if (undoing || from === undefined) return;
+  const g = undoGroup();
+  if (!g.names.has(id)) g.names.set(id, from);
+}
+function undoSummary(g) {
+  const tags = [...g.gallery.keys()].filter(k => k.startsWith('t:')).length;
+  const parts = [tags && `영상 ${tags}개의 태그`, g.names.size && `파일 이름 ${g.names.size}개`,
+    g.gallery.size - tags && `그 밖의 설정 ${g.gallery.size - tags}개`].filter(Boolean);
+  return parts.join(' · ');
+}
+async function undoLastChange() {
+  const g = undoStack[undoStack.length - 1];
+  if (!g) return;
+  const n = g.gallery.size + g.names.size;
+  if (n >= 10 && !await confirmBox(`마지막 작업을 되돌릴까요? (${undoSummary(g)})`, '되돌리기', false)) return;
+  if (g.names.size && !await ensureWriteScope()) return;
+  if (undoStack[undoStack.length - 1] !== g) return; // 그사이 새 변경이 생기면 다시 누르게
+  undoStack.pop();
+  undoing = true;
+  let failed = 0;
+  try {
+    applyChanges(gallery, g.gallery);
+    for (const [key, val] of g.gallery) pendingSaves.set(key, val);
+    for (const [id, name] of g.names) {
+      try {
+        await api(`${DRIVE}/files/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        const f = items.find(x => x.id === id);
+        if (f) f.name = name;
+      } catch { failed++; }
+    }
+  } finally { undoing = false; }
+  renderGrid();
+  flushSaves();
+  toast(`되돌렸어요: ${undoSummary(g)}` + (failed ? ` (파일 이름 ${failed}개는 되돌리지 못했어요)` : ''));
+}
 
 // gallery.json 은 이 브라우저에 사본을 두고 드라이브의 파일 지문(md5)이 같으면 다시 받지 않는다 (로그아웃하면 지움)
 const GCACHE = 'gallery-json';
@@ -1083,6 +1152,8 @@ async function loadGallery() {
   if (session !== Branding.session) return;
   ({ fileId: galleryFileId, data: gallery } = remote);
   applyChanges(gallery, pendingSaves); // 아직 저장 중인 변경은 화면에 그대로 유지
+  undoStack.length = 0; // 되돌리기는 지금 불러온 내용부터 (다른 계정 값이 섞이지 않게)
+  undoShadow = undoCopy({ ...gallery, videos: {}, settings: {} });
   Branding.apply(gallery.settings && gallery.settings.icon);
   for (const [id, v] of Object.entries(gallery.videos)) if (isInline(v) && !pendingSaves.has(id)) migrateQueue.add(id);
 }
@@ -1503,9 +1574,10 @@ function renderGrid() {
   MergeUI.panel();
   $('#mergeBtn').classList.toggle('primary', MergeUI.active);
   $('#topBtn').hidden = MergeUI.active || !token; // 편집 중엔 가운데 네모 버튼
-  if (!currentView && !SeriesUI.mode) $('#crumbs').append(el('button', {
-    className: 'edit-only small', textContent: '자동 정렬로 복원', onclick: ManualOrderUI.restore
-  }));
+  // [복원]: 가장 최근 작업(태그·이름 바꾸기 등)을 반대로 되돌림. 누를 때마다 한 작업씩 더 앞으로
+  const lastUndo = undoStack[undoStack.length - 1];
+  $('#crumbs').append(el('button', { className: 'edit-only small', textContent: '복원', disabled: !lastUndo,
+    title: lastUndo ? `마지막 작업 되돌리기 (${undoSummary(lastUndo)})` : '되돌릴 작업이 없어요', onclick: undoLastChange }));
   if (currentView) setStatus('');
   else if (query && !shown.length) setStatus('검색어가 들어간 파일이 없어요.');
   else if (nf && !shown.length) setStatus('조건에 맞는 영상이 없어요.');
