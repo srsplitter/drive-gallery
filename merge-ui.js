@@ -328,6 +328,24 @@ const MergeUI = (() => {
     }
     return plans;
   }
+  // 자동 정렬: 같은 제목 앞부분에 번호가 붙은 영상이 2개 이상이면 번호를 1부터 빈칸 없이 (3~7 → 1~5, 1·4~8 → 1~6).
+  // 번호가 없는 제목엔 붙이지 않고, 번호 붙은 영상이 하나뿐인 제목(예: "아이폰 15")은 그대로 둠
+  function gapPlans() {
+    const fams = new Map();
+    for (const f of items) {
+      const p = titleParts(f.name);
+      if (p.number === null || !p.key) continue;
+      if (!fams.has(p.key)) fams.set(p.key, []);
+      fams.get(p.key).push({ f, p });
+    }
+    const plans = [];
+    for (const list of fams.values()) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => a.p.number - b.p.number || GalleryOrder.compareText(a.f.name, b.f.name));
+      list.forEach(({ f, p }, i) => { const name = p.stem + (i + 1) + p.ext; if (name !== f.name) plans.push({ f, name }); });
+    }
+    return plans;
+  }
   async function renumber(plans) {
     let ok = 0;
     for (const { f, name } of plans) {
@@ -454,5 +472,5 @@ const MergeUI = (() => {
     }
   }
 
-  return { get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
+  return { gapPlans, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
 })();

@@ -68,6 +68,12 @@
     background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); font-size: 13px; }
   #catbar[hidden] ~ #autoSortBtn { display: none; }
   #autoSortBtn[hidden] { display: none; }
+  #autoSortBtn { display: grid; place-items: center; }
+  .round-ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  /* 맨 위로 (동그라미): 정렬 버튼 왼쪽. 편집 중엔 화면 가운데 네모 버튼이 대신함 */
+  #topBtn { position: fixed; right: 78px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20; width: 52px; height: 52px; padding: 0;
+    border-radius: 50%; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  #catbar[hidden] ~ #topBtn, #topBtn[hidden] { display: none; }
   /* PC: 왼쪽에서 밀려 나오는 패널(어둡게 안 깔고 뒤 목록도 그대로 쓸 수 있음). 헤더 아래부터 화면 끝까지, 내용이 길면 안에서 스크롤 */
   #menu { position: fixed; left: 0; top: var(--menu-top, 0px); bottom: 0; height: auto; max-height: none; width: 360px;
     margin: 0; border-radius: 0 14px 14px 0; border-left: 0; z-index: 30; display: flex; flex-direction: column;
@@ -78,8 +84,7 @@
   main, #catbar { transition: margin-left .22s ease, padding-left .22s ease; }
   body.menu-push main { margin-left: 360px; }
   body.menu-push #catbar { padding-left: 360px; }
-  body.menu-push #menuBtn { left: 376px; } /* ☰ 도 패널 옆으로 비켜서 다시 눌러 닫을 수 있게 */
-  #menuBtn { transition: left .22s ease; }
+  #menuBtn { z-index: 31; } /* PC 패널이 열려도 제자리, 패널 위에 떠 있어 다시 눌러 닫을 수 있음 */
   #menu .v-head { flex: none; }
   #menu .m-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   #menu::backdrop { background: transparent; }
@@ -452,7 +457,8 @@
 </header>
 <nav id="catbar" hidden></nav>
 <button id="menuBtn" aria-label="메뉴 (검색·정렬)"><i></i></button>
-<button id="autoSortBtn" type="button" aria-label="자동 정렬" title="저장한 영상 배치를 풀고 장르 → 캐릭터 → 카테고리 → 제목 번호 → 태그 순으로 정렬" hidden>자동<br>정렬</button>
+<button id="autoSortBtn" type="button" aria-label="자동 정렬" title="저장한 영상 배치를 풀고 장르 → 캐릭터 → 카테고리 → 제목 번호 → 태그 순으로 정렬 (같은 제목의 빈 번호도 당김)" hidden><svg class="round-ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+<button id="topBtn" type="button" aria-label="맨 위로" title="맨 위로"><svg class="round-ico" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
 <main>
   <section id="setup" class="notice" hidden>
     <h2>처음 설정</h2>
@@ -1225,8 +1231,21 @@ $('#menuClose').onclick = closeMenu;
 $('#menuReset').onclick = () => { menuDraft = null; filters = EMPTY_FILTERS(); renderGrid(); renderMenu(); };
 menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); }); // 폰: 바깥(어두운 곳) 누르면 닫힘
 $('#menuBtn').onclick = () => (menu.open && menu.classList.contains('in') ? closeMenu() : openMenu());
-$('#autoSortBtn').onclick = ManualOrderUI.autoSort;
+// 자동 정렬 + 빈 번호 당기기 (예: 마리오 3~7 → 1~5). 드라이브 파일 이름이 바뀌므로 한 번 확인
+$('#autoSortBtn').onclick = async () => {
+  ManualOrderUI.autoSort();
+  const plans = MergeUI.gapPlans();
+  if (!plans.length) return;
+  const ex = plans[0];
+  if (!await confirmBox(`번호가 비어 있는 제목 ${plans.length}개의 번호를 1부터 빈칸 없이 당길까요? (예: "${ex.f.name}" → "${ex.name}") 드라이브 파일 이름이 바뀌어요.`, '바꾸기', false)) return;
+  if (!await ensureWriteScope()) return;
+  setStatus(`번호를 당기는 중… (${plans.length}개)`);
+  const n = await MergeUI.renumber(plans);
+  renderGrid();
+  setStatus(n === plans.length ? `제목 ${n}개의 번호를 당겼어요.` : `제목 ${n}/${plans.length}개의 번호를 당겼어요. 나머지는 바꾸지 못했어요.`, n !== plans.length);
+};
 $('#mergeBtn').onclick = () => MergeUI.toggleMode();
+$('#topBtn').onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
 
 function renderMenu() {
   const editing = document.body.classList.contains('editing');
@@ -1459,6 +1478,7 @@ function renderGrid() {
   renderDirFocus();
   MergeUI.panel();
   $('#mergeBtn').classList.toggle('primary', MergeUI.active);
+  $('#topBtn').hidden = MergeUI.active || !token; // 편집 중엔 가운데 네모 버튼
   if (!currentView && !SeriesUI.mode) $('#crumbs').append(el('button', {
     className: 'edit-only small', textContent: '자동 정렬로 복원', onclick: ManualOrderUI.restore
   }));
