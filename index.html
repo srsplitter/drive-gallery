@@ -143,6 +143,7 @@
   /* PC: 카드 이름 아래 태그 (폰은 공간이 좁아 숨김) */
   /* PC: 제목과 구분선, 태그 칸은 더 어두운 바탕 (카드 아래까지) */
   .card-tags { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 7px 10px 9px; flex: 1; border-top: 1px solid var(--line); background: rgba(0,0,0,.28); }
+  .card-tags .fav-star { color: #ffc531; font-weight: normal; margin-right: 2px; } /* 즐겨찾기 태그 */
   .card-tags span { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 18px; }
   .pill.tag-kind-category, .pill.tag-kind-category.on, .card-tags span.tag-kind-category { border-color: #ff4f9a; }
   .pill.tag-kind-character, .pill.tag-kind-character.on, .card-tags span.tag-kind-character { border-color: #57b878; }
@@ -1803,7 +1804,7 @@ function videoCard(f, counts = tagCounts()) {
   };
   const card = el('button', { className: 'card', draggable: false, onclick: onCard },
     thumb, nameEl,
-    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t), textContent: t }))) : null, // PC: 이 영상의 태그
+    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t) }, isFav(t) ? el('b', { className: 'fav-star', textContent: '★' }) : null, t))) : null, // PC: 이 영상의 태그
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null,
     delEl);
   card.dataset.id = f.id;
