@@ -51,7 +51,7 @@
   .cat { margin-bottom: 28px; }
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
   #favoriteVideos h2 { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
-  #favoriteVideos + hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+  #favoriteVideos + hr, #starVideos + hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; } /* 즐겨찾기·별 구역 구분선 같은 모양 */
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
   /* 왼쪽 아래 ☰ 메뉴 버튼 (목록이 보일 때만) → 태그·통합·시간·카테고리 검색, 단 수(폰), 랜덤 */
