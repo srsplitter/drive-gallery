@@ -218,7 +218,7 @@
   .love-badge { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
   .love-badge path { fill: #ff4f9a; stroke: #fff; stroke-width: 2; }
   .card.mark-star .thumb::after, .card.mark-square .thumb::after, .card.loved .thumb::after {
-    content: ''; position: absolute; inset: 0; border: 3px solid #57b878; pointer-events: none; }
+    content: ''; position: absolute; inset: 0; border: 3px solid #57b878; border-radius: 11px 11px 0 0; pointer-events: none; }
   .card.mark-square .thumb::after { border-color: #a77950; }
   .card.loved .thumb::after { border-color: #ff4f9a; }
   .series-actions { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 12px; }
@@ -242,13 +242,40 @@
   #viewer:not(.page) .v-body { padding-left: 48px; padding-right: 48px; }
   @media (max-width: 520px), (pointer: coarse) { .viewer-nav { display: none; } #viewer:not(.page) .v-body { padding-left: 12px; padding-right: 12px; } }
   .card.is-hidden.loved .badge.hid { top: 32px; }
-  .mark-btn { padding: 4px 8px; font-size: 22px; line-height: 1; }
-  #vStar.on { color: #57b878; border-color: #57b878; }
-  #vSquare.on { color: #a77950; border-color: #a77950; }
+  /* 하트·별·네모 버튼: 같은 크기 칸, 아이콘 22px 가운데 */
+  .heart-btn { width: 40px; height: 36px; }
+  .heart-ico rect, .heart-ico path { stroke-linejoin: round; }
+  .heart-ico.mark-ico .off { fill: none; stroke: var(--dim); stroke-width: 2; }
+  .heart-ico.mark-star .on { fill: #57b878; stroke: #57b878; stroke-width: 2; }
+  .heart-ico.mark-square .on { fill: #a77950; stroke: #a77950; stroke-width: 2; }
+  #vStar:hover .off { stroke: #57b878; } #vSquare:hover .off { stroke: #a77950; }
   #directoryMemos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0 88px; }
   body:not(.editing) .tag-directory .star { display: none; }
   @media (max-width: 520px) { #directoryMemos { grid-template-columns: 1fr; } }
-  #directoryMemos[hidden], #bulkTag[hidden] { display: none; }
+  #directoryMemos[hidden], #bulkTag[hidden], #dirFocus[hidden] { display: none; }
+  #dirFocus { display: grid; gap: 14px; margin: 0 0 88px; }
+  #dirFocus .card.focus-out { opacity: .3; }
+  #dirFocus .card.focus-out .thumb::before { content: '빠짐'; position: absolute; left: 6px; top: 6px; z-index: 1; background: rgba(0,0,0,.75); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
+  /* 모든 영상, 수정 ON: 카드 아래 오른쪽 빨간 [삭제] */
+  .card-foot { margin-top: auto; display: flex; justify-content: flex-end; padding: 0 8px 8px; }
+  .card-del { background: #c62828; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 8px; }
+  .card-del:hover { background: #e53935; }
+  #confirmDlg { width: min(420px, 100vw - 32px); }
+  #confirmDlg p { margin: 0; line-height: 1.5; }
+  #starVideos h2, #favoriteVideos h2 { font-size: 16px; color: var(--dim); font-weight: 600; margin: 0 0 10px; }
+  /* 분류 칸 수정 ON: 즐겨찾기·수정·휴지통이 아래 3칸을 빈틈없이 나눠 씀, 휴지통은 빨강 */
+  body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin {
+    margin: 0; width: 100%; height: 38px; display: grid; place-items: center; position: relative; border-top: 1px solid var(--line);
+    -webkit-mask: none; mask: none; background: transparent; opacity: 1; padding: 0; }
+  body.editing .tag-directory .pen { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  body.editing .tag-directory .pen::before, body.editing .tag-directory .bin::before {
+    content: ''; width: 15px; height: 15px; background: currentColor;
+    -webkit-mask: var(--m) center / contain no-repeat; mask: var(--m) center / contain no-repeat; }
+  body.editing .tag-directory .pen::before { --m: var(--pen); }
+  body.editing .tag-directory .bin::before { --m: var(--bin); }
+  body.editing .tag-directory .bin { background: #c62828; color: #fff; }
+  body.editing .tag-directory .bin:hover { background: #e53935; }
+  body.editing .tag-directory .star:hover, body.editing .tag-directory .pen:hover { background: rgba(255,255,255,.06); }
   body[data-cols="4"] .love-badge { width: 16px; height: 16px; top: 4px; right: 4px; }
   /* 영상 창 제목 오른쪽 하트 버튼 */
   .heart-btn { padding: 4px 8px; display: grid; place-items: center; }
@@ -341,6 +368,10 @@
   .cover-candidate.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .series-open { display: inline-flex; align-items: center; gap: 10px; }
   .series-row > .cover-thumb { margin: 0 8px; }
+  @media (min-width: 521px) and (pointer: fine) {
+    .series-row { padding: 24px 12px; }
+    .series-row > .cover-thumb, .series-open > .cover-thumb { width: 160px; }
+  }
   .title-memos { margin-bottom: 20px; }
   .title-memos textarea { min-height: 94px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); color: var(--text); font: inherit; }
   .title-memos label { display: block; margin-bottom: 8px; }
@@ -393,6 +424,7 @@
   <div id="grid"></div>
   <div id="bulkTag" class="edit-only"></div>
   <div id="directoryMemos" class="edit-only" hidden></div>
+  <div id="dirFocus" class="edit-only" hidden></div>
 </main>
 
 <dialog id="viewer">
@@ -401,11 +433,18 @@
   <div class="v-head">
     <div class="title" id="vTitle"></div>
     <button id="vHeart" class="edit-only heart-btn" title="즐겨찾기 (하트)"></button>
-    <button id="vStar" class="edit-only mark-btn" title="별 표시" aria-label="별 표시">☆</button>
-    <button id="vSquare" class="edit-only mark-btn" title="네모 표시" aria-label="네모 표시">□</button>
+    <button id="vStar" class="edit-only heart-btn mark-btn" title="별 표시" aria-label="별 표시"></button>
+    <button id="vSquare" class="edit-only heart-btn mark-btn" title="네모 표시" aria-label="네모 표시"></button>
     <button id="vClose" aria-label="닫기">✕</button>
   </div>
   <div class="v-body" id="vBody"></div>
+</dialog>
+
+<dialog id="confirmDlg">
+  <div class="m-body">
+    <p id="confirmMsg"></p>
+    <div class="row end"><button id="confirmNo">취소</button><button id="confirmYes" class="danger">삭제</button></div>
+  </div>
 </dialog>
 
 <dialog id="menu">
@@ -628,7 +667,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {}, knownTags: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -657,11 +696,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings', 'knownTags']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings', 'n:': 'knownTags' };
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -778,10 +817,27 @@ function renderHeartBtn(f) {
   b.onclick = () => { setLoved(f, !isLoved(f)); renderHeartBtn(f); };
 }
 
+// 별·네모 아이콘 (하트와 같은 24x24 칸, 같은 굵기)
+const MARK_SHAPES = {
+  star: ['path', { d: 'M12 3.2l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17.2l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z' }],
+  square: ['rect', { x: 4.5, y: 4.5, width: 15, height: 15, rx: 2.5 }],
+};
+function markSvg(kind, filled) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', 'heart-ico mark-ico mark-' + kind);
+  const [tag, attrs] = MARK_SHAPES[kind];
+  const shape = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) shape.setAttribute(k, v);
+  shape.setAttribute('class', filled ? 'on' : 'off');
+  svg.append(shape);
+  return svg;
+}
 function renderMarkBtns(f) {
-  for (const [kind, id, off, on] of [['star', '#vStar', '☆', '★'], ['square', '#vSquare', '□', '■']]) {
+  for (const [kind, id] of [['star', '#vStar'], ['square', '#vSquare']]) {
     const b = $(id), active = gallery.marks[f.id] === kind;
-    b.textContent = active ? on : off;
+    b.replaceChildren(markSvg(kind, active));
     b.classList.toggle('on', active);
     b.setAttribute('aria-pressed', String(active));
     b.onclick = () => {
@@ -801,10 +857,20 @@ const isFav = t => !!gallery.fav[t];
 // "4k, 게임 ,4k" → ['4k', '게임'] (쉼표·줄바꿈으로 나눔, 앞뒤 공백 제거, 중복 제거)
 const parseTags = s => [...new Set(s.split(/[,，\n]/).map(t => t.trim()).filter(Boolean))];
 
+// 태그가 어느 영상에도 안 붙게 돼도 목록·추천에서 사라지지 않게 남겨 둠 (휴지통으로 지울 때만 없어짐)
+function keepTags(list) {
+  for (const t of list) {
+    if (gallery.knownTags[t] || items.some(f => tagsOf(f).includes(t))) continue;
+    gallery.knownTags[t] = true;
+    pendingSaves.set('n:' + t, true);
+  }
+}
 function setTags(f, tags) {
   tags = [...new Set(tags)];
+  const removed = tagsOf(f).filter(t => !tags.includes(t));
   if (tags.length) gallery.tags[f.id] = tags; else delete gallery.tags[f.id];
   pendingSaves.set('t:' + f.id, tags.length ? tags : null);
+  keepTags(removed);
   renderGrid();
   flushSaves();
 }
@@ -816,8 +882,10 @@ function toggleFav(t) {
 }
 // 태그 → 그 태그가 붙은 영상 수 (많은 순)
 function tagCounts() {
-  return new Map([...window.GalleryOrder.countTags(items, gallery)].sort((a, b) =>
+  const counts = new Map([...window.GalleryOrder.countTags(items, gallery)].sort((a, b) =>
     b[1] - a[1] || window.GalleryOrder.compareText(a[0], b[0])));
+  for (const t of Object.keys(gallery.knownTags || {})) if (!counts.has(t)) counts.set(t, 0); // 지금은 안 쓰이는 태그(0개)
+  return counts;
 }
 function sortedTags(f, counts = tagCounts()) {
   const kindOrder = { category: 0, genre: 1, character: 2, normal: 3 };
@@ -870,6 +938,7 @@ function deleteTag(t) {
     pendingSaves.set('t:' + f.id, next.length ? next : null);
   }
   if (isFav(t)) { delete gallery.fav[t]; pendingSaves.set('f:' + t, null); }
+  if (gallery.knownTags[t]) { delete gallery.knownTags[t]; pendingSaves.set('n:' + t, null); }
   if (gallery.exUse[t]) { delete gallery.exUse[t]; pendingSaves.set('x:' + t, null); }
   const drop = list => list.filter(x => x !== t);
   filters.tags = drop(filters.tags);
@@ -1312,7 +1381,7 @@ function renderGrid() {
     onclick: () => { filters = EMPTY_FILTERS(); menuDraft = null; renderGrid(); if (menu.open) renderMenu(); } }));
   const counts = tagCounts();
   const filtered = visible.filter(f => (currentView === 'series' || !query || f.name.toLowerCase().includes(query)
-    || (currentView === 'title' && tagsOf(f).some(t => t.toLowerCase().includes(query)))) && matchesFilters(f));
+    || (currentView !== 'title' && tagsOf(f).some(t => t.toLowerCase().includes(query)))) && matchesFilters(f));
   shown = window.GalleryOrder.sortVideos(filtered, { ...gallery, loved: {} }, items);
   shown = ManualOrderUI.sorted(shown, 'regular');
   if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
@@ -1327,14 +1396,18 @@ function renderGrid() {
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
     const favorites = !SeriesUI.mode ? ManualOrderUI.sorted(shown.filter(isLoved), 'favorites') : [];
-    if (favorites.length) {
-      const section = el('section', { id: 'favoriteVideos' },
-        el('h2', { textContent: '즐겨찾기' }),
-        el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts))));
-      $('#grid').replaceChildren(section, el('hr'), regular);
-    } else $('#grid').replaceChildren(regular);
+    const starred = !SeriesUI.mode ? shown.filter(f => gallery.marks[f.id] === 'star') : [];
+    const parts = [];
+    if (favorites.length) parts.push(el('section', { id: 'favoriteVideos' },
+      el('h2', { textContent: '즐겨찾기' }),
+      el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts)))), el('hr'));
+    if (starred.length) parts.push(el('section', { id: 'starVideos' },
+      el('h2', { textContent: '별' }),
+      el('div', { className: 'cat-grid' }, ...starred.map(f => videoCard(f, counts)))), el('hr'));
+    $('#grid').replaceChildren(...parts, regular);
     ManualOrderUI.bind();
   }
+  renderDirFocus();
   if (!currentView && !SeriesUI.mode) $('#crumbs').append(el('button', {
     className: 'edit-only small', textContent: '자동 정렬로 복원', onclick: ManualOrderUI.restore
   }));
@@ -1360,7 +1433,8 @@ try {
 const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'category');
 
 function directoryTabs() {
-  return [...directoryKinds.filter(([kind]) => kind !== 'category'), ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
+  const order = ['normal', 'genre', 'character', 'category'];
+  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
@@ -1391,7 +1465,7 @@ function renderCatbar() {
     return updateSticky();
   }
   bar.replaceChildren(el('div', { className: 'catscroll' },
-    el('button', { className: 'chip', textContent: '🔍', title: '파일 이름 검색', onclick: openSearch }),
+    el('button', { className: 'chip', textContent: '🔍', title: '검색', onclick: openSearch }),
     ...directoryTabs()), SeriesUI.toolbar());
   updateSticky();
 }
@@ -1411,7 +1485,9 @@ function renderDirectory() {
     button.setAttribute('aria-pressed', String(dirCols === n));
     return button;
   }));
-  const tags = [...counts.keys()].filter(t => tagKind(t) === currentView && (!query || t.toLowerCase().includes(query))).sort(window.GalleryOrder.compareText);
+  const hit = t => !query || t.toLowerCase().includes(query)
+    || items.some(f => tagsOf(f).includes(t) && (f.name.toLowerCase().includes(query) || tagsOf(f).some(x => x.toLowerCase().includes(query))));
+  const tags = [...counts.keys()].filter(t => tagKind(t) === currentView && hit(t)).sort(window.GalleryOrder.compareText);
   $('#grid').replaceChildren(columns, el('div', { className: 'pills tag-directory' }, ...tags.map(t => DirectoryThumbs.item('tag:' + t, pill(t, counts.get(t), {
     onclick: () => {
       if (document.body.classList.contains('editing')) { DirectoryThumbs.toggle('tag:' + t); renderGrid(); return; }
@@ -1427,7 +1503,7 @@ function renderDirectory() {
     },
     onStar: editing ? () => { toggleFav(t); renderGrid(); } : null,
     onRename: editing ? renderGrid : null,
-    onDelete: editing ? () => deleteTag(t) : null, confirm: true
+    onDelete: editing ? async () => { if (await confirmBox(`"${t}" 태그를 삭제하시겠습니까? (모든 영상에서 빠져요)`)) deleteTag(t); } : null
   }), items.filter(f => tagsOf(f).includes(t))))));
   DirectoryThumbs.layout($('#grid .tag-directory'));
   const memos = $('#directoryMemos');
@@ -1461,9 +1537,7 @@ function renderDirectory() {
 }
 
 function searchPlaceholder() {
-  if (currentView === 'title') return '통합 검색 · 제목 또는 태그';
-  if (currentView === 'series') return '시리즈 이름 검색';
-  return currentView ? directoryKinds.find(([kind]) => kind === currentView)[1] + ' 이름 검색' : '파일 이름 검색';
+  return currentView === 'title' ? '제목 검색' : '통합 검색 · 제목 또는 태그';
 }
 
 function openSearch() {
@@ -1540,8 +1614,14 @@ function videoCard(f, counts = tagCounts()) {
   const nameEl = el('div', { className: 'name', textContent: f.name, title: f.name });
   // 수정 ON: 카드 제목을 누르면 영상 창 대신 그 자리에서 이름 바꾸기.
   // 사파리·파이어폭스는 버튼 안을 눌러도 버튼 자체가 눌린 것으로 오므로, 누른 위치가 제목 칸 안인지로 판단
+  // 모든 영상 화면에서만: 수정 ON 이면 카드 아래 오른쪽에 빨간 [삭제] (카드가 버튼이라 누른 위치로 판단)
+  const delEl = !currentView && !SeriesUI.mode ? el('div', { className: 'card-foot edit-only' }, el('span', { className: 'card-del', textContent: '삭제' })) : null;
   const onCard = e => {
     if (SeriesUI.mode) return SeriesUI.choose(f);
+    if (delEl && document.body.classList.contains('editing')) {
+      const d = delEl.firstChild.getBoundingClientRect();
+      if (e.clientX >= d.left && e.clientX <= d.right && e.clientY >= d.top && e.clientY <= d.bottom) return deleteFromList(f);
+    }
     if (cardRenaming || Date.now() - cardRenameEnded < 400) return; // 이름 고치는 중이거나, 다른 곳을 눌러 막 저장한 클릭
     const r = nameEl.getBoundingClientRect();
     const inName = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
@@ -1551,7 +1631,8 @@ function videoCard(f, counts = tagCounts()) {
   const card = el('button', { className: 'card', draggable: false, onclick: onCard },
     thumb, nameEl,
     tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t), textContent: t }))) : null, // PC: 이 영상의 태그
-    dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null);
+    dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null,
+    delEl);
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
   if (gallery.marks[f.id]) card.classList.add('mark-' + gallery.marks[f.id]);
@@ -1842,6 +1923,26 @@ function openViewer(f) {
   if (document.body.classList.contains('editing')) viewerUI.startCands();
 }
 
+// 삭제 확인 창: 취소 / 삭제 → true·false
+function confirmBox(msg) {
+  const d = $('#confirmDlg');
+  $('#confirmMsg').textContent = msg;
+  return new Promise(resolve => {
+    const done = ok => { $('#confirmYes').onclick = $('#confirmNo').onclick = d.oncancel = null; if (d.open) d.close(); resolve(ok); };
+    $('#confirmYes').onclick = () => done(true);
+    $('#confirmNo').onclick = () => done(false);
+    d.oncancel = () => done(false);
+    d.showModal();
+    $('#confirmNo').focus();
+  });
+}
+// 목록에서 삭제(드라이브 휴지통으로, 30일 안에 복원 가능)
+async function deleteFromList(f) {
+  if (!await confirmBox(`"${f.name}" 영상을 삭제하시겠습니까? (드라이브 휴지통으로 옮겨져 30일 안에 복원할 수 있어요)`)) return;
+  if (!await ensureWriteScope()) return;
+  trashVideo(f);
+}
+
 // ---------- 영상 휴지통으로 ----------
 // 🗑️ 를 누르면 그 자리에서 [취소] [🗑️ 휴지통으로 이동]으로 바뀌고, 한 번 더 누르면 드라이브 휴지통으로 옮김(30일 안에 복원 가능).
 // 창은 바로 닫히고 목록에서도 바로 빠지며, 실제 이동은 뒤에서. 실패하면 목록에 되돌려 놓음.
@@ -2013,6 +2114,7 @@ bulkRemoveDone.onclick = () => {
     pendingSaves.set('t:' + f.id, next.length ? next : null);
     n++;
   }
+  keepTags(typed); // 모든 영상에서 빠져도 태그 자체는 남김
   bulkRemoveTa.value = '';
   renderGrid();
   flushSaves();
@@ -2030,6 +2132,86 @@ $('#bulkTag').append(
   el('div', { className: 'm-sec' }, el('b', { textContent: '보이는 영상에서 제거' }),
     el('div', { className: 'memo' }, bulkRemoveTa, bulkRemoveDone),
     el('p', { className: 'hint', textContent: '일반·카테고리·캐릭터·장르 등 모든 종류의 태그를 이름이 정확히 일치할 때만 제거합니다.' })));
+
+// ---------- 펼친 분류·시리즈 칸 (수정 ON) ----------
+// 칸을 누르면(대표 이미지 고르기) 이동 메모 아래에: 그 영상들(누르면 잠시 빼기) → 그 영상들에 태그 추가 → 태그 종류 바꾸기
+const focusOut = new Set(); // 잠시 뺀 영상 ID (다른 칸을 펼치면 초기화)
+let focusKey = null, focusKind = 'normal';
+const focusAddTa = el('textarea', { placeholder: '태그를 쉼표로 구분해 적고 Enter → 위 영상들에 붙음' });
+const focusAddBtn = el('button', { className: 'primary done' });
+const focusKindTa = el('textarea', { placeholder: '위 영상들에 붙은 태그를 적고 Enter → 고른 종류로 바뀜' });
+const focusKindBtn = el('button', { className: 'primary done', textContent: '바꾸기' });
+const focusKindChips = el('div', { className: 'pills' });
+function focusVideos(key) {
+  if (key.startsWith('tag:')) return DirectoryThumbs.ordered(items.filter(f => tagsOf(f).includes(key.slice(4))));
+  const ids = ((gallery.series || {})[key.slice(7)] || {}).videoIds || [];
+  const byId = new Map(items.map(f => [f.id, f]));
+  return ids.map(id => byId.get(id)).filter(f => f && (!isHidden(f) || (showHidden && document.body.classList.contains('editing'))));
+}
+const focusActive = () => focusKey ? focusVideos(focusKey).filter(f => !focusOut.has(f.id)) : [];
+focusAddBtn.onclick = () => {
+  focusAddTa.focus({ preventScroll: true });
+  const typed = parseTags(focusAddTa.value), targets = focusActive();
+  if (!typed.length || !targets.length || !document.body.classList.contains('editing')) return;
+  for (const f of targets) {
+    const next = [...new Set([...tagsOf(f), ...typed])];
+    if (next.length === tagsOf(f).length) continue;
+    gallery.tags[f.id] = next;
+    pendingSaves.set('t:' + f.id, next);
+  }
+  focusAddTa.value = '';
+  renderGrid();
+  flushSaves();
+  setStatus(`영상 ${targets.length}개에 태그 ${typed.map(t => `(${t})`).join(' ')} 를 붙였어요.`);
+};
+focusKindBtn.onclick = () => {
+  focusKindTa.focus({ preventScroll: true });
+  const have = new Set(focusActive().flatMap(tagsOf));
+  const typed = parseTags(focusKindTa.value).filter(t => have.has(t));
+  if (!typed.length || !document.body.classList.contains('editing')) return;
+  for (const t of typed) setTagKind(t, focusKind);
+  focusKindTa.value = '';
+  renderGrid();
+  flushSaves();
+  setStatus(`태그 ${typed.map(t => `(${t})`).join(' ')} 를 ${directoryKinds.find(([k]) => k === focusKind)[1]}(으)로 바꿨어요.`);
+};
+memoKeys(focusAddTa, () => focusAddBtn.click());
+memoKeys(focusKindTa, () => focusKindBtn.click());
+function renderDirFocus() {
+  const box = $('#dirFocus');
+  const key = currentView && currentView !== 'title' ? DirectoryThumbs.current() : null;
+  box.hidden = !key;
+  if (!key) { focusKey = null; return; }
+  if (focusKey !== key) { focusKey = key; focusOut.clear(); }
+  const counts = tagCounts(), all = focusVideos(key), active = all.filter(f => !focusOut.has(f.id));
+  const name = key.startsWith('tag:') ? key.slice(4) : ((gallery.series[key.slice(7)] || {}).name || '시리즈');
+  focusAddBtn.textContent = `영상 ${active.length}개에 붙이기`;
+  focusKindChips.replaceChildren(...directoryKinds.map(([k, label]) => {
+    const b = el('button', { className: 'chip' + (k === focusKind ? ' on' : ''), textContent: label,
+      onclick: () => { focusKind = k; renderDirFocus(); } });
+    b.setAttribute('aria-pressed', String(k === focusKind));
+    return b;
+  }));
+  const cards = all.map(f => {
+    const card = videoCard(f, counts);
+    card.classList.toggle('focus-out', focusOut.has(f.id));
+    card.onclick = () => { // 영상 창 대신 잠시 빼기 / 다시 넣기
+      if (focusOut.has(f.id)) focusOut.delete(f.id); else focusOut.add(f.id);
+      renderDirFocus();
+    };
+    return card;
+  });
+  const prevScroll = scrollY;
+  box.replaceChildren(
+    el('h2', { className: 'cat-title', textContent: `${name} · 영상 ${all.length}개` }),
+    el('div', { className: 'row' },
+      el('span', { className: 'hint', textContent: focusOut.size ? `잠시 뺀 영상 ${focusOut.size}개 (다시 누르면 넣음)` : '영상을 누르면 아래 메모 적용에서 잠시 빠져요.' }),
+      focusOut.size ? el('button', { className: 'small', textContent: '모두 다시 넣기', onclick: () => { focusOut.clear(); renderDirFocus(); } }) : null),
+    el('div', { className: 'cat-grid' }, ...cards),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '이 영상들에 태그 추가' }), el('div', { className: 'memo' }, focusAddTa, focusAddBtn)),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '이 영상들의 태그 종류 바꾸기' }), focusKindChips, el('div', { className: 'memo' }, focusKindTa, focusKindBtn)));
+  if (scrollY !== prevScroll) scrollTo(0, prevScroll);
+}
 
 // ---------- 영상 창의 태그 칸 ----------
 // 위: 이 영상의 알약들 (+ = 하나 추가(다른 영상 태그를 많은 순으로 추천), 수정 = 전체를 메모 칸에 펼쳐 고치기)

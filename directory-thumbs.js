@@ -109,5 +109,6 @@ const DirectoryThumbs = (() => {
   function tag(t, pill) {
     return item('tag:' + t, pill, items.filter(f => tagsOf(f).includes(t)));
   }
-  return { item, tag, toggle, layout };
+  // current: 수정 ON 에서 지금 펼친 항목('tag:이름' / 'series:ID'), 없으면 null
+  return { item, tag, toggle, layout, ordered, current: () => (editing() ? expanded : null) };
 })();

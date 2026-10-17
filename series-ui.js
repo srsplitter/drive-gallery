@@ -119,7 +119,10 @@ const SeriesUI = (() => {
   }
   function library() {
     const list = el('div', { className: 'series-library' }), rows = el('div', { id: 'seriesList' });
-    const entries = Object.entries(saved()).filter(([, s]) => !query || s.name.toLowerCase().includes(query));
+    // 통합 검색: 시리즈 이름, 또는 그 시리즈 영상의 제목·태그
+    const memberHit = id => items.some(f => members(id).includes(f.id)
+      && (f.name.toLowerCase().includes(query) || tagsOf(f).some(t => t.toLowerCase().includes(query))));
+    const entries = Object.entries(saved()).filter(([id, s]) => !query || s.name.toLowerCase().includes(query) || memberHit(id));
     for (const [id, s] of entries) {
       const title = el('button', { className: 'series-open', textContent: s.name + ' · ' + members(id).length + '개',
         onclick: () => {
