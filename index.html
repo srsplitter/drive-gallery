@@ -133,7 +133,8 @@
   .pill .bin:hover { opacity: 1; color: var(--danger); }
   .pill .bin.armed { opacity: 1; color: var(--danger); }
   /* PC: 카드 이름 아래 태그 (폰은 공간이 좁아 숨김) */
-  .card-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 10px 8px; margin-top: -2px; }
+  /* PC: 제목과 구분선, 태그 칸은 더 어두운 바탕 (카드 아래까지) */
+  .card-tags { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 7px 10px 9px; flex: 1; border-top: 1px solid var(--line); background: rgba(0,0,0,.28); }
   .card-tags span { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 18px; }
   .pill.tag-kind-category, .pill.tag-kind-category.on, .card-tags span.tag-kind-category { border-color: #ff4f9a; }
   .pill.tag-kind-character, .pill.tag-kind-character.on, .card-tags span.tag-kind-character { border-color: #57b878; }
@@ -159,7 +160,7 @@
   body.editing .pill .star:hover { background: rgba(255,197,49,.15); }
   /* 길이: PC는 썸네일 위, 폰은 이름 아래 줄(구분선 + 오른쪽 정렬 + 흐린 색) */
   .dur-line { display: none; color: #6b717c; text-align: right; border-top: 1px solid var(--line); }
-  .card .name.dur-line { padding-top: 4px; padding-bottom: 4px; }
+  .card .name.dur-line { padding-top: 4px; padding-bottom: 4px; background: rgba(0,0,0,.32); } /* 폰: 시간 칸은 더 어둡게 */
   @media (max-width: 520px), (pointer: coarse) {
     .badge.dur { display: none; } .dur-line { display: block; }
     body[data-cols] .cat-grid { grid-template-columns: repeat(var(--cols), 1fr); }
@@ -276,6 +277,9 @@
   body.editing .tag-directory .bin { background: #c62828; color: #fff; }
   body.editing .tag-directory .bin:hover { background: #e53935; }
   body.editing .tag-directory .star:hover, body.editing .tag-directory .pen:hover { background: rgba(255,255,255,.06); }
+  /* 아래 3칸 줄은 딱 38px, 칸은 위아래 꽉 채움 → 빨간 휴지통이 칸 모서리 둥글기(overflow 로 잘림)를 그대로 따름 */
+  body.editing .tag-directory > .directory-item > .pill { grid-template-rows: auto auto 38px; }
+  body.editing .tag-directory .pill > .star, body.editing .tag-directory .pill > .pen, body.editing .tag-directory .pill > .bin { align-self: stretch; height: auto; margin: 0; }
   body[data-cols="4"] .love-badge { width: 16px; height: 16px; top: 4px; right: 4px; }
   /* 영상 창 제목 오른쪽 하트 버튼 */
   .heart-btn { padding: 4px 8px; display: grid; place-items: center; }
