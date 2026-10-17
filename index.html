@@ -1012,11 +1012,15 @@ function deleteTag(t) {
 function editTagInline(p, t, after) {
   const input = el('input', { className: 'm-in pill-in', value: t, spellcheck: false });
   let done = false;
-  const finish = save => {
+  const finish = async save => {
     if (done) return;
     done = true;
     const name = input.value.trim();
-    if (save && name && name !== t) renameTag(t, name);
+    // 영상 10개 이상이 한꺼번에 바뀌면 먼저 물어봄
+    const n = items.filter(f => tagsOf(f).includes(t)).length;
+    if (save && name && name !== t && (n < 10 || await confirmBox(tagCounts().has(name)
+      ? `"${t}" 태그가 붙은 영상 ${n}개가 모두 기존 "${name}" 태그로 합쳐져요. 바꿀까요?`
+      : `"${t}" 태그가 붙은 영상 ${n}개의 태그가 모두 "${name}"(으)로 바뀌어요. 바꿀까요?`, '바꾸기', false))) renameTag(t, name);
     after();
   };
   input.onkeydown = e => {
