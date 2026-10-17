@@ -1007,6 +1007,7 @@ function toggleFav(t) {
   if (!document.body.classList.contains('editing')) return;
   if (isFav(t)) delete gallery.fav[t]; else gallery.fav[t] = true;
   pendingSaves.set('f:' + t, isFav(t) || null);
+  renderGrid(); // 카드 아래 태그의 ★ 도 바로
   flushSaves();
 }
 // 태그 → 그 태그가 붙은 영상 수 (많은 순)
@@ -1514,6 +1515,34 @@ async function openFolder(galleryLoading) {
     scrollToNextTodo();
   } catch (e) { handleError(e); }
 }
+
+// 드라이브에 새로 올라온(또는 지워진·이름 바뀐) 영상을 새로고침 없이 반영: 이 탭으로 돌아올 때 + 보고 있는 동안 2분마다.
+// 30초 안에는 다시 묻지 않고, 입력 중이면 다음 차례로 미룸. 있던 영상은 같은 객체를 고쳐 씀(열린 창·합치기 작업이 들고 있으므로)
+let listCheckedAt = Date.now(), listChecking = false;
+async function refreshList() {
+  if (!token || !items.length || listChecking || document.hidden || Date.now() - listCheckedAt < 30000) return;
+  if (document.activeElement && document.activeElement.matches('input, textarea')) return;
+  listChecking = true;
+  try {
+    const vids = await listAllVideos();
+    listCheckedAt = Date.now();
+    const old = new Map(items.map(f => [f.id, f]));
+    let changed = vids.length !== items.length, added = 0;
+    const next = vids.map(v => {
+      const f = old.get(v.id);
+      if (!f) { added++; changed = true; return v; }
+      if (f.name !== v.name) changed = true;
+      return Object.assign(f, v);
+    });
+    if (!changed) return;
+    items = next;
+    renderGrid();
+    if (added) toast(`드라이브에서 새 영상 ${added}개를 불러왔어요.`);
+  } catch {} finally { listChecking = false; }
+}
+document.addEventListener('visibilitychange', refreshList);
+addEventListener('focus', refreshList);
+setInterval(refreshList, 120000);
 
 // 수정 ON: 아직 썸네일을 안 정한 첫 영상 카드로 스크롤하고 테두리로 표시 (목록을 열 때·수정을 켤 때·다시 로그인할 때)
 function scrollToNextTodo() {
