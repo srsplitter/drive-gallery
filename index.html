@@ -288,7 +288,8 @@
   .up-ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
   .scissors-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .merge-item-btns { gap: 4px; } .merge-item-btns button.small { margin-left: 0; }
-  .card.merge-picked .thumb { outline: 3px solid #ffc531; outline-offset: -3px; } /* 합칠 영상으로 담은 카드: 노란 테두리 */
+  .card.merge-picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); } /* 목록에서 합칠 영상으로 고른 카드: 파란 테두리 */
+  .merge-thumb { outline: 3px solid #ffc531; outline-offset: -3px; } /* 합치기 칸에 담긴 영상 썸네일: 노란 테두리 */
   .merge-bar { height: 10px; border-radius: 6px; background: var(--bg); overflow: hidden; border: 1px solid var(--line); }
   .merge-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
   .hint.error { color: var(--danger); }
@@ -296,7 +297,8 @@
   #dirFocus .card.focus-out { opacity: .3; }
   #dirFocus .card.focus-out .thumb::before { content: '빠짐'; position: absolute; left: 6px; top: 6px; z-index: 1; background: rgba(0,0,0,.75); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
   /* 모든 영상, 수정 ON: 카드 아래 오른쪽 빨간 [삭제] */
-  .card-foot { margin-top: auto; display: flex; justify-content: flex-end; padding: 0 8px 8px; }
+  /* 삭제 버튼은 카드 맨 아래 자기 줄에서 오른쪽, 위아래 가운데 (위쪽은 구분선) */
+  .card-foot { margin-top: auto; display: flex; justify-content: flex-end; align-items: center; padding: 7px 10px; border-top: 1px solid var(--line); background: rgba(0,0,0,.28); }
   .card-del { background: #c62828; color: #fff; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 8px; }
   .card-del:hover { background: #e53935; }
   #confirmDlg { width: min(420px, 100vw - 32px); }
