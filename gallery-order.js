@@ -62,8 +62,17 @@
       const cat = ts.filter(t => kinds[t] === 'category').sort((a, b) => (cats.get(b) || 0) - (cats.get(a) || 0) || compareText(a, b))[0] || '';
       const number = numberedTitle(f);
       const family = number && (families.get(familyKey(f, number)) || new Set()).size >= 2 ? number : null;
-      return { f, ts, genre, cat, char, family, catCount: cats.get(cat) || 0, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id] };
+      return { f, ts, genre, cat, char, family, catCount: cats.get(cat) || 0, charCount: n.get(char) || 0, loved: !!(gallery.loved || {})[f.id],
+        familyKey: family ? familyKey(f, number) : null };
     });
+    // 번호 제목 묶음은 한 덩어리: 묶음 전체가 구성원 중 가장 많이 쓰인 카테고리를 따름 (카테고리로 묶음이 쪼개지지 않게)
+    const familyCat = new Map();
+    for (const d of data) {
+      if (!d.familyKey || !d.cat) continue;
+      const best = familyCat.get(d.familyKey);
+      if (!best || d.catCount > best.catCount || (d.catCount === best.catCount && compareText(d.cat, best.cat) < 0)) familyCat.set(d.familyKey, { cat: d.cat, catCount: d.catCount });
+    }
+    for (const d of data) if (d.familyKey && familyCat.has(d.familyKey)) Object.assign(d, familyCat.get(d.familyKey));
     const stage = d => d.loved ? 0 : d.ts.length || d.family ? 1 : 2;
     const compareFamily = (a, b) => {
       if (!a.family || !b.family) return a.family ? -1 : b.family ? 1 : 0;
@@ -76,8 +85,9 @@
       if (a.loved || stage(a) === 2) return 0;
       return (a.genre === b.genre ? 0 : !a.genre ? 1 : !b.genre ? -1 : ranked(a.genre, b.genre))
         || (a.char === b.char ? 0 : !a.char ? 1 : !b.char ? -1 : b.charCount - a.charCount || compareText(a.char, b.char))
-        || compareFamily(a, b)
+        // 카테고리를 번호 제목 묶음보다 먼저: 제목 앞부분 순서 때문에 같은 카테고리가 흩어지지 않게
         || (a.cat === b.cat ? 0 : !a.cat ? 1 : !b.cat ? -1 : b.catCount - a.catCount || compareText(a.cat, b.cat))
+        || compareFamily(a, b)
         || b.ts.length - a.ts.length;
     }
     const signature = d => [...d.ts].sort(compareText);

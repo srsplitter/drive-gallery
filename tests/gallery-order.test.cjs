@@ -188,3 +188,16 @@ test('similarity cannot move numeric members; duplicate indices allow category f
   ], { popular: 'category' });
   assert.deepEqual(f.order(), ['one', 'dup', 'two', 'ten']);
 });
+
+test('numbered title groups do not scatter categories; groups stay whole inside their category', () => {
+  const list = [], tags = {};
+  const add = (name, cat) => { const id = 'v' + list.length; list.push(f(id, name)); tags[id] = [cat, '일반']; };
+  for (let i = 1; i <= 7; i++) add('가 ' + i + '.mp4', 'C1');
+  for (let i = 1; i <= 4; i++) add('나 ' + i + '.mp4', 'C2');
+  for (let i = 1; i <= 9; i++) add('다 ' + i + '.mp4', 'C1');
+  add('라 1.mp4', 'C3'); add('라 2.mp4', 'C3');
+  add('마 1.mp4', 'C1'); add('마 2.mp4', 'C1');
+  const out = sortVideos(list, { tags, tagKinds: { C1: 'category', C2: 'category', C3: 'category' } });
+  assert.deepEqual(out.map(x => tags[x.id][0]).join(' '), [...Array(18).fill('C1'), ...Array(4).fill('C2'), 'C3', 'C3'].join(' '));
+  assert.deepEqual(out.slice(0, 7).map(x => x.name), [1, 2, 3, 4, 5, 6, 7].map(i => '가 ' + i + '.mp4'));
+});
