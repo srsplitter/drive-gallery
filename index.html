@@ -1027,14 +1027,14 @@ function setTagKind(t, kind) {
   pendingSaves.set('k:' + t, kind === 'normal' ? null : kind);
 }
 // 알약: ★/☆ 이름 (개수). onStar 가 있으면 별만 따로 눌림
-// onRename 이 있으면(수정 ON) 오른쪽에 연필 — 누르면 그 자리에서 이름 바꾸기
+// onRename 이 있으면(수정 ON) 오른쪽에 연필 — 누르면 그 자리에서 이름 바꾸기 (renameOne 이 있으면 그 영상에서만, 없으면 모든 영상)
 // onDelete 가 있으면 그 오른쪽에 휴지통 — confirm 이면 한 번 누르면 빨개지고(3초) 한 번 더 눌러야 삭제
-function pill(t, count, { onclick, onStar, on, onRename, onDelete, confirm } = {}) {
+function pill(t, count, { onclick, onStar, on, onRename, renameOne, onDelete, confirm } = {}) {
   const star = el('span', { className: 'star' + (isFav(t) ? ' fav' : ''), textContent: isFav(t) ? '★' : '☆' });
   if (onStar) star.onclick = e => { e.stopPropagation(); onStar(); };
   const p = el('button', { className: 'pill tag-kind-' + tagKind(t) + (on ? ' on' : ''), onclick }, star, t, count ? el('span', { className: 'cnt', textContent: `(${count})` }) : null);
-  if (onRename) p.append(el('span', { className: 'pen', title: '태그 이름 바꾸기',
-    onclick: e => { e.stopPropagation(); editTagInline(p, t, onRename); } }));
+  if (onRename) p.append(el('span', { className: 'pen', title: renameOne ? '이 영상의 태그만 이름 바꾸기' : '모든 영상에서 태그 이름 바꾸기',
+    onclick: e => { e.stopPropagation(); editTagInline(p, t, onRename, renameOne); } }));
   if (onDelete) {
     const bin = el('span', { className: 'bin', title: confirm ? '모든 영상에서 이 태그 삭제 (한 번 더 누르면 삭제)' : '이 영상에서 태그 빼기' });
     let timer = 0;
@@ -1078,13 +1078,18 @@ function deleteTag(t) {
 }
 
 // 알약 자리에 입력칸 → Enter 로만 저장, Esc·다른 곳 누르면 취소. 끝나면 after() 로 다시 그림
-function editTagInline(p, t, after) {
+// renameOne(새 이름) 이 있으면 그것만 부름 (영상 창: 이 영상의 태그만), 없으면 모든 영상의 태그 이름을 바꿈
+function editTagInline(p, t, after, renameOne) {
   const input = el('input', { className: 'm-in pill-in', value: t, spellcheck: false });
   let done = false;
   const finish = async save => {
     if (done) return;
     done = true;
     const name = input.value.trim();
+    if (renameOne) {
+      if (save && name && name !== t) renameOne(name);
+      return after();
+    }
     // 영상 10개 이상이 한꺼번에 바뀌면 먼저 물어봄
     const n = items.filter(f => tagsOf(f).includes(t)).length;
     if (save && name && name !== t && (n < 10 || await confirmBox(tagCounts().has(name)
@@ -2455,6 +2460,10 @@ function tagBox(f) {
     const row = tagsOf(f).length ? el('div', { className: 'pills' },
       ...sortedTags(f, counts).map(t => pill(t, counts.get(t), { onStar: editing() ? () => { toggleFav(t); render(); } : null,
         onRename: editing() ? render : null,
+        renameOne: name => { // 이 영상의 태그만 같은 자리에서 바꿈. 처음 쓰는 이름이면 원래 태그의 종류를 이어받음
+          if (!tagCounts().has(name) && !(name in gallery.tagKinds) && tagKind(t) !== 'normal') setTagKind(name, tagKind(t));
+          setTags(f, tagsOf(f).map(x => (x === t ? name : x)));
+        },
         onDelete: editing() ? () => { setTags(f, tagsOf(f).filter(x => x !== t)); render(); } : null })),
       el('button', { className: 'pill ghost', textContent: '+', title: '태그 하나 추가', onclick: adder }),
       el('button', { className: 'pill ghost', textContent: '수정', title: '태그 전체를 메모 칸에서 고치기',
