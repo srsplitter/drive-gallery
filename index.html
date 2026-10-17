@@ -50,7 +50,6 @@
   #status.error { color: var(--danger); }
   .cat { margin-bottom: 28px; }
   .cat-title { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
-  #favoriteVideos h2 { font-size: 16px; margin: 0 0 10px; color: var(--dim); font-weight: 600; }
   #favoriteVideos + hr, #starVideos + hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; } /* 즐겨찾기·별 구역 구분선 같은 모양 */
   .cat-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
   @media (max-width: 520px) { .cat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; } main { padding: 12px; } }
@@ -312,7 +311,9 @@
   .card-del:hover { background: #e53935; }
   #confirmDlg { width: min(420px, 100vw - 32px); }
   #confirmDlg p { margin: 0; line-height: 1.5; }
-  #starVideos h2, #favoriteVideos h2 { font-size: 16px; color: var(--dim); font-weight: 600; margin: 0 0 10px; }
+  /* 구역 이름(즐겨찾기·추천·동영상): 아래에도 구분선 — 위 구분선과 같은 선, 이름과 카드 사이 간격 */
+  #starVideos h2, #favoriteVideos h2, #regularVideos > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600;
+    margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   /* 분류 칸 수정 ON: 즐겨찾기·수정·휴지통이 아래 3칸을 빈틈없이 나눠 씀, 휴지통은 빨강 */
   body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin {
     margin: 0; width: 100%; height: 38px; display: grid; place-items: center; position: relative; border-top: 1px solid var(--line);
@@ -1485,8 +1486,10 @@ function renderGrid() {
       el('h2', { textContent: '즐겨찾기' }),
       el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts)))), el('hr'));
     if (starred.length) parts.push(el('section', { id: 'starVideos' },
-      el('h2', { textContent: '별' }),
+      el('h2', { textContent: '추천' }),
       el('div', { className: 'cat-grid' }, ...starred.map(f => videoCard(f, counts)))), el('hr'));
+    // 위에 즐겨찾기·추천 구역이 있으면 전체 목록에도 "동영상" 이름을 붙임
+    if (parts.length) regular.prepend(el('h2', { className: 'section-title', textContent: '동영상' }));
     $('#grid').replaceChildren(...parts, regular);
     ManualOrderUI.bind();
   }
