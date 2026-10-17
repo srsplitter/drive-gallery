@@ -1,24 +1,26 @@
 // 헤더 [편집] → 영상 합치기 (수정 ON, PC 크롬·엣지).
-// 필터·검색으로 영상을 찾고 썸네일을 누르면 누른 순서대로 담김 → 각 영상 아래 가위(✂)로 그 영상 앞 1초에 넣을 장면을 고름
+// 필터·검색으로 영상을 찾고 썸네일을 누르면 누른 순서대로 담김 → 합친 영상 맨 앞 1초에 넣을 장면을 하나 고름
+// (담은 영상들의 지정 썸네일 중에서, 또는 영상 아래 가위로 그 영상의 한 지점을 찍어서)
 // → 이름을 정하고 [합치기] → 드라이브에서 조금씩 읽어 합치고 조금씩 드라이브에 올림 → 다 올라간 걸 확인한 뒤에만 원본을 휴지통으로.
 // index.html 의 전역(api, DRIVE, UPLOAD, token, tokenExp, AuthError, ensureWriteScope, items, renderGrid, openViewer, viewer,
 // el, $, setStatus, trashVideo …)을 씀.
 const MergeUI = (() => {
   let active = false, running = null; // running = { ctrl, url }
-  let picks = []; // [{ f, intro: canvas|null, introUrl }]
+  let picks = []; // [{ f }] 담은 순서
+  let intro = null; // 합친 영상 맨 앞 1초 장면 { img: 캔버스·이미지, url: 미리보기, key: 고른 썸네일의 영상 ID | null(가위로 찍음) }
   let nameDraft = '';
   const isPC = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && 'VideoEncoder' in window;
 
   function toggleMode() {
     if (running) return;
     active = !active;
-    if (!active) picks = [];
+    if (!active) { picks = []; intro = null; }
     renderGrid();
   }
   function toggle(f) {
     if (running) return;
     const at = picks.findIndex(p => p.f.id === f.id);
-    if (at >= 0) picks.splice(at, 1); else picks.push({ f, intro: null, introUrl: '' });
+    if (at >= 0) picks.splice(at, 1); else picks.push({ f });
     renderGrid();
   }
   // 카드에 담긴 순서 번호
@@ -30,12 +32,12 @@ const MergeUI = (() => {
     card.querySelector('.thumb').append(el('span', { className: 'series-order-badge', textContent: String(at + 1) }));
   }
 
-  // 가위: 영상 창을 열어 지점을 고르고 "이 지점으로 썸네일 설정" → 그 장면을 이 영상 앞 1초로
+  // 가위: 그 영상의 창을 열어 지점을 고르고 "이 지점으로 썸네일 설정" → 그 장면을 합친 영상 맨 앞 1초로
   function pickIntro(p) {
     window.mergePick = { f: p.f, done: canvas => {
-      p.intro = canvas;
-      p.introKey = null;
-      try { p.introUrl = canvas.toDataURL('image/jpeg', 0.7); } catch { p.introUrl = ''; }
+      let url = '';
+      try { url = canvas.toDataURL('image/jpeg', 0.7); } catch {}
+      intro = { img: canvas, url, key: null };
       window.mergePick = null;
       renderGrid();
     } };
@@ -94,38 +96,43 @@ const MergeUI = (() => {
       oninput: () => { nameDraft = nameIn.value; } });
     const list = el('div', { className: 'merge-list' }, ...picks.map((p, i) => {
       const move = d => () => { const j = i + d; if (j < 0 || j >= picks.length) return; [picks[i], picks[j]] = [picks[j], picks[i]]; renderGrid(); };
-      const cut = el('button', { className: 'merge-cut' + (p.intro ? ' set' : ''), title: '이 영상 앞 1초에 넣을 장면 고르기', onclick: () => pickIntro(p) },
-        p.introUrl ? el('img', { src: p.introUrl, alt: '' }) : scissors(), el('span', { textContent: p.intro ? '앞 1초 장면' : '앞 1초 장면 고르기' }));
-      const owned = ownedThumbs();
-      const choices = owned.length ? el('div', { className: 'merge-choices' }, ...owned.map(o => {
-        const img = el('img', { alt: '', title: o.name + ' 의 썸네일' });
-        o.url.then(u => { img.src = u; }, () => img.parentElement && img.parentElement.remove());
-        const b = el('button', { className: 'merge-choice' + (p.introKey === o.key ? ' on' : ''), title: '이 썸네일을 앞 1초 장면으로',
-          onclick: async () => {
-            const u = await o.url;
-            const im = new Image();
-            await new Promise((ok, bad) => { im.onload = ok; im.onerror = () => bad(new Error('썸네일을 불러오지 못했어요')); im.src = u; });
-            Object.assign(p, { intro: im, introUrl: u, introKey: o.key });
-            renderGrid();
-          } }, img);
-        return b;
-      })) : null;
+      const cut = el('button', { className: 'merge-cut', title: '이 영상의 한 지점을 찍어 맨 앞 1초 장면으로', onclick: () => pickIntro(p) },
+        scissors(), el('span', { textContent: '이 영상에서 장면 찍기' }));
       return el('div', { className: 'merge-item' },
         el('div', { className: 'merge-thumb' }, thumbOf(p.f), el('span', { className: 'series-order-badge', textContent: String(i + 1) })),
         el('div', { className: 'merge-name', textContent: p.f.name, title: p.f.name }),
         cut,
-        choices,
         el('div', { className: 'row merge-item-btns' },
           el('button', { className: 'small', textContent: '◀', title: '앞으로', disabled: i === 0, onclick: move(-1) }),
           el('button', { className: 'small', textContent: '▶', title: '뒤로', disabled: i === picks.length - 1, onclick: move(1) }),
-          p.intro ? el('button', { className: 'small', textContent: '장면 빼기', onclick: () => { p.intro = null; p.introUrl = ''; p.introKey = null; renderGrid(); } }) : null,
           el('button', { className: 'small', textContent: '빼기', onclick: () => toggle(p.f) })));
     }));
+    const owned = ownedThumbs();
+    const choices = el('div', { className: 'merge-choices' }, ...owned.map(o => {
+      const img = el('img', { alt: '', title: o.name + ' 의 썸네일' });
+      o.url.then(u => { img.src = u; }, () => img.parentElement && img.parentElement.remove());
+      return el('button', { className: 'merge-choice' + (intro && intro.key === o.key ? ' on' : ''), title: o.name + ' 의 썸네일을 맨 앞 1초 장면으로',
+        onclick: async () => {
+          const u = await o.url;
+          const im = new Image();
+          await new Promise((ok, bad) => { im.onload = ok; im.onerror = () => bad(new Error('썸네일을 불러오지 못했어요')); im.src = u; });
+          intro = { img: im, url: u, key: o.key };
+          renderGrid();
+        } }, img);
+    }));
+    const introSec = picks.length ? el('div', { className: 'm-sec merge-intro' },
+      el('b', { textContent: '맨 앞 1초 장면' }),
+      el('div', { className: 'row' },
+        intro ? el('img', { className: 'merge-intro-now', src: intro.url, alt: '' }) : el('span', { className: 'hint', textContent: '없음 (바로 첫 영상부터 시작)' }),
+        intro ? el('button', { className: 'small', textContent: '빼기', onclick: () => { intro = null; renderGrid(); } }) : null),
+      owned.length ? choices : null,
+      el('p', { className: 'hint', textContent: owned.length ? '담은 영상들의 썸네일을 누르면 그 장면이 맨 앞 1초가 돼요. 다른 장면은 영상 아래 가위로 찍으세요.' : '담은 영상 아래 가위로 영상의 한 지점을 찍으면 맨 앞 1초 장면이 돼요.' })) : null;
     const go = el('button', { className: 'primary m-big', textContent: `${picks.length}개 합치기`, disabled: picks.length < 2, onclick: start });
     box.replaceChildren(...[
       el('div', { className: 'row' }, el('b', { textContent: '영상 합치기' }),
         el('span', { className: 'hint', textContent: '검색·필터로 영상을 찾고 썸네일을 누른 순서대로 담겨요. 다시 누르면 빠져요.' })),
       picks.length ? list : el('p', { className: 'hint', textContent: '아직 담은 영상이 없어요.' }),
+      introSec,
       el('div', { className: 'm-sec' }, el('b', { textContent: '합친 영상 이름' }), nameIn),
       el('p', { className: 'hint', textContent: '합친 영상은 첫 영상이 있는 드라이브 폴더에 올라가고, 다 올라간 걸 확인한 뒤 원본은 드라이브 휴지통으로 옮겨져요(30일 안에 복원 가능). 해상도는 첫 영상에 맞추고, 합치는 동안 이 탭을 열어 두세요.' }),
       isPC() ? null : el('p', { className: 'hint error', textContent: '영상 합치기는 PC 크롬·엣지에서만 돼요.' }),
@@ -212,7 +219,7 @@ const MergeUI = (() => {
     if (!/\.mp4$/i.test(name)) name += '.mp4';
     if (picks.some(p => !(+p.f.size > 0))) return setStatus('크기 정보가 없는 영상이 있어 합칠 수 없어요.', true);
     if (!await ensureWriteScope()) return;
-    const list = picks.map(p => ({ ...p })), ctrl = new AbortController();
+    const list = picks.map(p => ({ ...p })), first1s = intro && intro.img, ctrl = new AbortController();
     running = { ctrl, url: null };
     const bar = el('div', { className: 'merge-bar' }, el('i'));
     const label = el('div', { className: 'hint' });
@@ -238,7 +245,7 @@ const MergeUI = (() => {
       if (est && est.quota - est.usage < need) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(need / 1e9).toFixed(1)}GB)`);
       tmp = await tempFile();
       await VideoMerge.merge({
-        parts: list.map(p => ({ name: p.f.name, size: +p.f.size, read: driveRead(p.f, ctrl.signal), intro: p.intro })),
+        parts: list.map((p, i) => ({ name: p.f.name, size: +p.f.size, read: driveRead(p.f, ctrl.signal), intro: i === 0 ? first1s : null })),
         writable: tmp.writable, signal: ctrl.signal, onProgress: p => { prog = p; show(); },
       });
       const blob = await tmp.file();
@@ -269,6 +276,7 @@ const MergeUI = (() => {
       if (mark) { gallery.marks[made.id] = mark; pendingSaves.set('m:' + made.id, mark); }
       flushSaves();
       picks = [];
+      intro = null;
       nameDraft = '';
       active = false;
       running = null;
