@@ -124,23 +124,25 @@ const MergeUI = (() => {
   // ---- 합친 파일은 먼저 이 브라우저의 임시 저장공간(OPFS)에 표준 MP4 로 다 만듦 ----
   // (MP4 는 끝난 뒤 파일 앞쪽의 길이 칸을 다시 써야 해서, 드라이브에 바로 이어 올릴 수 없음)
   const TMP = 'merge-tmp.mp4';
-  async function tempFile() {
+  async function tempFile(name = TMP) {
     const root = await navigator.storage.getDirectory();
-    const handle = await root.getFileHandle(TMP, { create: true });
+    const handle = await root.getFileHandle(name, { create: true });
     const ws = await handle.createWritable();
     const writable = new WritableStream({
       write: chunk => ws.write({ type: 'write', position: chunk.position, data: chunk.data }),
       close: () => ws.close(),
       abort: () => ws.abort(),
     });
-    return { writable, file: () => handle.getFile(), remove: () => root.removeEntry(TMP).catch(() => {}) };
+    return { writable, file: () => handle.getFile(), remove: () => root.removeEntry(name).catch(() => {}) };
   }
 
   // ---- 다 만든 파일을 드라이브에 8MB 씩 올리기 (재개 가능 업로드). 조각은 256KB 배수, 드라이브가 위치를 확인함 ----
   const UNIT = 256 * 1024, CHUNK = 32 * UNIT; // 8MB
-  async function driveUpload(meta, blob, onSent, signal) {
-    const r = await api(`${UPLOAD}/files?uploadType=resumable&fields=id,name,size,mimeType,parents,thumbnailLink,videoMediaMetadata(durationMillis)`, {
-      method: 'POST', signal,
+  // fileId 가 있으면 새 파일 대신 그 파일의 내용을 바꿈(파일 ID·이름·태그는 그대로, 드라이브에 이전 버전이 남음)
+  async function driveUpload(meta, blob, onSent, signal, fileId) {
+    const fields = 'fields=id,name,size,mimeType,parents,thumbnailLink,videoMediaMetadata(durationMillis)';
+    const r = await api(fileId ? `${UPLOAD}/files/${fileId}?uploadType=resumable&${fields}` : `${UPLOAD}/files?uploadType=resumable&${fields}`, {
+      method: fileId ? 'PATCH' : 'POST', signal,
       headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'video/mp4', 'X-Upload-Content-Length': String(blob.size) },
       body: JSON.stringify(meta) });
     const url = r.headers.get('Location');
@@ -220,6 +222,9 @@ const MergeUI = (() => {
         } catch {}
       }
       items.unshift({ ...made, category: first.category });
+      // 원본들이 갖고 있던 태그를 합쳐 붙임 (같은 태그는 한 번만, 원본 순서대로)
+      const tags = [...new Set(list.flatMap(p => tagsOf(p.f)))];
+      if (tags.length) { gallery.tags[made.id] = tags; pendingSaves.set('t:' + made.id, tags); flushSaves(); }
       picks = [];
       nameDraft = '';
       active = false;
@@ -239,5 +244,53 @@ const MergeUI = (() => {
     }
   }
 
-  return { get active() { return active; }, get running() { return !!running; }, toggleMode, toggle, decorate, panel, isPC };
+  // ---- 조각 MP4 고치기: 영상 창(수정 ON, PC)에서 조각 형식이면 버튼을 보여 주고, 다시 압축하지 않고 표준 MP4 로 바꿔 같은 파일에 덮어씀 ----
+  async function offerFix(f) {
+    const slot = $('#fixSlot');
+    if (!slot || !isPC() || !document.body.classList.contains('editing') || !(+f.size > 0) || !/mp4|quicktime|m4v/.test(f.mimeType || '')) return;
+    const ctrl = new AbortController();
+    let frag = false;
+    try { frag = await VideoMerge.isFragmented(driveRead(f, ctrl.signal), +f.size); } catch { return; }
+    if (!frag || viewerFile !== f || !slot.isConnected) return;
+    const label = el('span', { className: 'hint', textContent: '이 영상은 조각 MP4 형식이라 폰에서 앞 몇 초만 재생될 수 있어요.' });
+    const btn = el('button', { className: 'primary', textContent: '폰 재생용으로 고치기' });
+    btn.onclick = () => fix(f, slot, btn, label);
+    slot.replaceChildren(el('div', { className: 'row' }, btn, label));
+  }
+  async function fix(f, slot, btn, label) {
+    if (running) return;
+    if (!await confirmBox(`"${f.name}" 을(를) 다시 압축하지 않고 표준 MP4 로 바꿔 같은 파일에 덮어써요. 화질은 그대로이고, 드라이브에 이전 버전이 남아요. 진행할까요?`, '고치기', false)) return;
+    if (!await ensureWriteScope()) return;
+    const ctrl = new AbortController();
+    running = { ctrl, url: null };
+    btn.disabled = true;
+    const cancel = el('button', { textContent: '취소', onclick: () => ctrl.abort() });
+    btn.after(cancel);
+    const guard = e => { e.preventDefault(); e.returnValue = ''; };
+    addEventListener('beforeunload', guard);
+    let tmp = null;
+    try {
+      tmp = await tempFile('fix-tmp.mp4');
+      await VideoMerge.remux({ size: +f.size, read: driveRead(f, ctrl.signal), writable: tmp.writable, signal: ctrl.signal,
+        onProgress: p => { label.textContent = `옮겨 담는 중 ${Math.round(p * 70)}%`; } });
+      const blob = await tmp.file();
+      const made = await driveUpload({}, blob, n => { label.textContent = `드라이브에 올리는 중 ${Math.round(70 + 30 * n / blob.size)}%`; }, ctrl.signal, f.id);
+      if (!made || +made.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요.');
+      running.url = null;
+      f.size = made.size;
+      slot.replaceChildren(el('span', { className: 'hint', textContent: '고쳤어요. 이제 폰에서도 끝까지 재생돼요. (드라이브가 새로 처리하는 동안 잠깐 재생이 안 될 수 있어요)' }));
+    } catch (e) {
+      const url = running && running.url;
+      if (url) fetch(url, { method: 'DELETE' }).catch(() => {});
+      label.textContent = e.name === 'AbortError' ? '취소했어요. 원본은 그대로예요.' : '고치지 못했어요: ' + e.message + ' (원본은 그대로예요)';
+      btn.disabled = false;
+      cancel.remove();
+    } finally {
+      running = null;
+      removeEventListener('beforeunload', guard);
+      if (tmp) tmp.remove();
+    }
+  }
+
+  return { get active() { return active; }, get running() { return !!running; }, toggleMode, toggle, decorate, panel, isPC, offerFix };
 })();

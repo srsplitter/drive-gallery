@@ -1905,6 +1905,7 @@ function openViewer(f) {
     el('p', { className: 'hint edit-only ext-only', textContent: '시간선·버튼으로 장면을 맞추고 "지금 화면으로 지정" → 플레이어 컨트롤 없이 바로 찍혀요.' }),
     canCapture ? el('p', { className: 'hint edit-only no-ext-only',
       textContent: '원하는 장면에서 멈추고 컨트롤이 내려간 상태로 "지금 화면으로 지정" → 바로 찍혀요. 직접 찍은 스크린샷을 붙여넣기(Ctrl+V)해도 돼요. 확장 프로그램을 설치하면 공유 허용 없이 컨트롤도 자동으로 숨기고 찍어요.' }) : null,
+    el('div', { id: 'fixSlot', className: 'edit-only' }), // 조각 MP4 면 "폰 재생용으로 고치기"
     el('div', { className: 'row end edit-only' },
       // 갤러리에서만 숨기기/해제 (드라이브엔 그대로) — 바로 닫히고 저장은 뒤에서
       el('button', { textContent: isHidden(f) ? '숨김 해제' : '숨기기', title: '갤러리에서만 숨김 (드라이브 파일은 그대로)',
@@ -1948,15 +1949,17 @@ function openViewer(f) {
       if (viewerFile === f) playerLoading = false;
     }
   }, { once: true });
+  MergeUI.offerFix(f);
   // 대표 장면: 수정 ON 이면 바로, 창을 연 채 수정을 켜면 그때 (미리 뽑아 둔 게 있으면 즉시 보임)
   viewerUI.startCands = () => { if (!cands.hasChildNodes()) showCandidates(f, iframe, cands, captureBtn); };
   if (document.body.classList.contains('editing')) viewerUI.startCands();
 }
 
 // 삭제 확인 창: 취소 / 삭제 → true·false
-function confirmBox(msg) {
+function confirmBox(msg, okLabel = '삭제', danger = true) {
   const d = $('#confirmDlg');
   $('#confirmMsg').textContent = msg;
+  Object.assign($('#confirmYes'), { textContent: okLabel, className: danger ? 'danger' : 'primary' });
   return new Promise(resolve => {
     const done = ok => { $('#confirmYes').onclick = $('#confirmNo').onclick = d.oncancel = null; if (d.open) d.close(); resolve(ok); };
     $('#confirmYes').onclick = () => done(true);

@@ -171,5 +171,30 @@ const VideoMerge = (() => {
     ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
   }
 
-  return { merge, load };
+  // 조각 MP4(fragmented) 인지: 앞부분에 moov 안의 mvex 나 moof 상자가 있으면 조각 형식
+  async function isFragmented(read, size) {
+    const head = await read(0, Math.min(size, 2 * 2 ** 20));
+    for (let i = 4; i + 4 <= head.length; i++) {
+      if (head[i] === 0x6d && ((head[i + 1] === 0x76 && head[i + 2] === 0x65 && head[i + 3] === 0x78) // mvex
+        || (head[i + 1] === 0x6f && head[i + 2] === 0x6f && head[i + 3] === 0x66))) return true;       // moof
+    }
+    return false;
+  }
+
+  // 다시 압축하지 않고 표준 MP4(moov 끝)로 옮겨 담기 (화질 그대로, 빠름)
+  async function remux({ size, read, writable, onProgress = () => {}, signal }) {
+    const MB = await load();
+    const input = new MB.Input({ formats: MB.ALL_FORMATS, source: new MB.CustomSource({ getSize: () => size, read, prefetchProfile: 'network' }) });
+    const output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: false }),
+      target: new MB.StreamTarget(writable, { chunked: true, chunkSize: 8 * 2 ** 20 }) });
+    const conv = await MB.Conversion.init({ input, output, tracks: 'primary' });
+    if (!conv.isValid) throw new Error('이 영상은 그대로 옮겨 담을 수 없어요.');
+    conv.onProgress = p => onProgress(p);
+    const stop = () => conv.cancel();
+    if (signal) signal.addEventListener('abort', stop, { once: true });
+    try { await conv.execute(); }
+    finally { if (signal) signal.removeEventListener('abort', stop); try { input.dispose && input.dispose(); } catch {} }
+  }
+
+  return { merge, load, isFragmented, remux };
 })();
