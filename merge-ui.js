@@ -346,14 +346,17 @@ const MergeUI = (() => {
     }
     return plans;
   }
-  async function renumber(plans) {
-    let ok = 0;
+  // onEach(i, { from, name }): 하나 바꿀 때마다 (진행 표시용)
+  async function renumber(plans, onEach = () => {}) {
+    let ok = 0, i = 0;
     for (const { f, name } of plans) {
+      const from = f.name;
       try {
         await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
         f.name = name;
         ok++;
       } catch {}
+      onEach(++i, { from, name });
     }
     return ok;
   }
