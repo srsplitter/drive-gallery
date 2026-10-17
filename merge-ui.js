@@ -302,6 +302,44 @@ const MergeUI = (() => {
     return el('div', { className: 'm-sec merge-jobs' }, el('b', { textContent: '합치기 작업' }), ...jobs.map(j => j.el));
   }
 
+  // ---- 합친 뒤 번호 다시 매기기 ----
+  // "마리오 1~8" 중 1~3 을 합치면 남은 4~8 → 1~5. 합친 영상 이름이 같은 앞부분에 번호(예: 마리오1)면 그 번호는 비워 두고 나머지를 채움 → 2~6
+  function titleParts(name) {
+    const m = String(name).match(/^(.*?)(.[^.]+)?$/);
+    const base = m[1], ext = m[2] || '';
+    const n = base.match(/^(.*?)([0-9]+)$/);
+    return { stem: n ? n[1] : base, key: (n ? n[1] : base).normalize('NFKC').toLowerCase().trim(), number: n ? Number(n[2]) : null, ext };
+  }
+  function renumberPlans(originals, made) {
+    const keys = new Set(originals.map(f => titleParts(f.name)).filter(p => p.number !== null).map(p => p.key));
+    const m = titleParts(made.name), plans = [];
+    for (const key of keys) {
+      const family = items.map(f => ({ f, p: titleParts(f.name) }))
+        .filter(x => x.f.id !== made.id && x.p.number !== null && x.p.key === key)
+        .sort((a, b) => a.p.number - b.p.number);
+      const taken = m.number !== null && m.key === key ? m.number : null;
+      let n = 1;
+      for (const { f, p } of family) {
+        if (n === taken) n++;
+        const name = p.stem + n + p.ext;
+        if (name !== f.name) plans.push({ f, name });
+        n++;
+      }
+    }
+    return plans;
+  }
+  async function renumber(plans) {
+    let ok = 0;
+    for (const { f, name } of plans) {
+      try {
+        await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        f.name = name;
+        ok++;
+      } catch {}
+    }
+    return ok;
+  }
+
   async function runJob(job) {
     const { list, name, ctrl } = job;
     job.state = 'running';
@@ -344,6 +382,11 @@ const MergeUI = (() => {
         } catch {}
       }
       items.unshift({ ...made, category: first.category });
+      // 원본이 번호 붙은 제목이면 남은 같은 제목들의 번호를 빈칸 없이 다시 매김 (휴지통으로 옮긴 원본만 빠진 것으로 봄)
+      const gone = list.filter(p => !items.some(x => x.id === p.f.id)).map(p => p.f);
+      const plans = renumberPlans(gone, made);
+      let renamed = 0;
+      if (plans.length) { job.show(100, `번호를 다시 매기는 중… (${plans.length}개)`); renamed = await renumber(plans); }
       // 원본들이 갖고 있던 태그를 합쳐 붙임 (같은 태그는 한 번만, 원본 순서대로)
       const tags = [...new Set(list.flatMap(p => tagsOf(p.f)))];
       if (tags.length) { gallery.tags[made.id] = tags; pendingSaves.set('t:' + made.id, tags); }
@@ -355,7 +398,8 @@ const MergeUI = (() => {
       flushSaves();
       job.state = 'done';
       job.show(100, `만들었어요. 원본 ${trashed}/${list.length}개를 드라이브 휴지통으로 옮겼어요(30일 안에 복원 가능).`
-        + (trashed < list.length ? ' 옮기지 못한 원본은 그대로 있어요.' : ''));
+        + (trashed < list.length ? ' 옮기지 못한 원본은 그대로 있어요.' : '')
+        + (plans.length ? ` 남은 영상 ${renamed}/${plans.length}개의 번호를 다시 매겼어요.` : ''));
     } catch (e) {
       if (job.url) fetch(job.url, { method: 'DELETE' }).catch(() => {}); // 올리다 만 파일은 버림
       job.url = null;
