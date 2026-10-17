@@ -1008,7 +1008,7 @@ function deleteTag(t) {
   flushSaves();
 }
 
-// 알약 자리에 입력칸 → Enter·다른 곳 누르면 저장, Esc 취소. 끝나면 after() 로 다시 그림
+// 알약 자리에 입력칸 → Enter 로만 저장, Esc·다른 곳 누르면 취소. 끝나면 after() 로 다시 그림
 function editTagInline(p, t, after) {
   const input = el('input', { className: 'm-in pill-in', value: t, spellcheck: false });
   let done = false;
@@ -1027,7 +1027,7 @@ function editTagInline(p, t, after) {
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
   };
-  input.onblur = () => finish(true);
+  input.onblur = () => finish(false); // 모르고 다른 곳을 눌러도 이름이 바뀌지 않게
   p.replaceWith(input);
   input.focus();
   input.select();
