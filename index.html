@@ -1036,10 +1036,11 @@ function renameTag(from, to) {
     if (!gallery.covers['tag:' + to]) { gallery.covers['tag:' + to] = gallery.covers['tag:' + from]; pendingSaves.set('p:tag:' + to, gallery.covers['tag:' + to]); }
     delete gallery.covers['tag:' + from]; pendingSaves.set('p:tag:' + from, null);
   }
-  const kind = tagKind(from);
+  // 이미 있는 태그로 합치면 그 태그의 종류를 그대로 둠 (새 이름일 때만 종류를 옮김)
+  const kind = tagKind(from), merging = tagCounts().has(to) || to in gallery.tagKinds;
   delete gallery.tagKinds[from];
   pendingSaves.set('k:' + from, null);
-  setTagKind(to, kind);
+  if (!merging) setTagKind(to, kind);
   for (const f of items) {
     const tags = tagsOf(f);
     if (!tags.includes(from)) continue;
