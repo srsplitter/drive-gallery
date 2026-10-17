@@ -253,7 +253,24 @@
   #directoryMemos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 24px 0 88px; }
   body:not(.editing) .tag-directory .star { display: none; }
   @media (max-width: 520px) { #directoryMemos { grid-template-columns: 1fr; } }
-  #directoryMemos[hidden], #bulkTag[hidden], #dirFocus[hidden] { display: none; }
+  #directoryMemos[hidden], #bulkTag[hidden], #dirFocus[hidden], #mergePanel[hidden] { display: none; }
+  /* 영상 합치기 */
+  @media (max-width: 520px), (pointer: coarse) { #mergeBtn { display: none !important; } } /* PC 전용 */
+  #mergePanel { display: grid; gap: 12px; margin-bottom: 20px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--panel); }
+  .merge-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .merge-item { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-width: 0; }
+  .merge-thumb { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
+  .merge-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .merge-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .merge-cut { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; }
+  .merge-cut img { width: 48px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
+  .merge-cut.set { border-color: var(--accent); }
+  .scissors-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .merge-item-btns { gap: 4px; } .merge-item-btns button.small { margin-left: 0; }
+  .card.merge-picked .thumb { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .merge-bar { height: 10px; border-radius: 6px; background: var(--bg); overflow: hidden; border: 1px solid var(--line); }
+  .merge-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .hint.error { color: var(--danger); }
   #dirFocus { display: grid; gap: 14px; margin: 0 0 88px; }
   #dirFocus .card.focus-out { opacity: .3; }
   #dirFocus .card.focus-out .thumb::before { content: '빠짐'; position: absolute; left: 6px; top: 6px; z-index: 1; background: rgba(0,0,0,.75); color: #fff; font-size: 12px; padding: 1px 6px; border-radius: 6px; }
@@ -401,6 +418,7 @@
 <body>
 <header>
   <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon"><img src="icons/gallery-192.png" alt=""></span><span>갤러리</span></button></h1>
+  <button id="mergeBtn" class="edit-only" type="button" title="영상 합치기">편집</button>
   <input id="brandFile" type="file" accept="image/*" hidden>
   <div id="crumbs"></div>
   <span id="saveState"></span>
@@ -425,6 +443,7 @@
     <button class="primary" id="loginBtn">구글로 로그인</button>
   </section>
   <div id="status"></div>
+  <div id="mergePanel" class="edit-only" hidden></div>
   <div id="grid"></div>
   <div id="bulkTag" class="edit-only"></div>
   <div id="directoryMemos" class="edit-only" hidden></div>
@@ -467,6 +486,8 @@
 <script src="title-editor.js"></script>
 <script src="directory-thumbs.js"></script>
 <script src="branding.js?v=20261017-safari3"></script>
+<script src="video-merge.js"></script>
+<script src="merge-ui.js"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -1182,6 +1203,7 @@ $('#menuReset').onclick = () => { menuDraft = null; filters = EMPTY_FILTERS(); r
 menu.addEventListener('click', e => { if (e.target === menu) closeMenu(); }); // 폰: 바깥(어두운 곳) 누르면 닫힘
 $('#menuBtn').onclick = () => (menu.open && menu.classList.contains('in') ? closeMenu() : openMenu());
 $('#autoSortBtn').onclick = ManualOrderUI.autoSort;
+$('#mergeBtn').onclick = () => MergeUI.toggleMode();
 
 function renderMenu() {
   const editing = document.body.classList.contains('editing');
@@ -1412,6 +1434,8 @@ function renderGrid() {
     ManualOrderUI.bind();
   }
   renderDirFocus();
+  MergeUI.panel();
+  $('#mergeBtn').classList.toggle('primary', MergeUI.active);
   if (!currentView && !SeriesUI.mode) $('#crumbs').append(el('button', {
     className: 'edit-only small', textContent: '자동 정렬로 복원', onclick: ManualOrderUI.restore
   }));
@@ -1622,6 +1646,7 @@ function videoCard(f, counts = tagCounts()) {
   const delEl = !currentView && !SeriesUI.mode ? el('div', { className: 'card-foot edit-only' }, el('span', { className: 'card-del', textContent: '삭제' })) : null;
   const onCard = e => {
     if (SeriesUI.mode) return SeriesUI.choose(f);
+    if (MergeUI.active && document.body.classList.contains('editing')) return MergeUI.toggle(f);
     if (delEl && document.body.classList.contains('editing')) {
       const d = delEl.firstChild.getBoundingClientRect();
       if (e.clientX >= d.left && e.clientX <= d.right && e.clientY >= d.top && e.clientY <= d.bottom) return deleteFromList(f);
@@ -1642,6 +1667,7 @@ function videoCard(f, counts = tagCounts()) {
   if (gallery.marks[f.id]) card.classList.add('mark-' + gallery.marks[f.id]);
   if (isLoved(f)) { card.classList.add('loved'); thumb.append(heartSvg(true, 'love-badge')); }
   SeriesUI.decorate(card, f);
+  MergeUI.decorate(card, f);
   return card;
 }
 
@@ -1748,7 +1774,7 @@ function directPlayer(f) {
 
 // close 이벤트는 비동기로 오므로, 그사이 다시 열렸으면 새 내용을 지우지 않는다
 viewer.addEventListener('close', () => {
-  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); lockPage(false); slideTo(0, 0); }
+  if (!viewer.open) { closeViewerResources(); prefetchCandidates(); lockPage(false); slideTo(0, 0); window.mergePick = null; }
   if (history.state && history.state.viewer) history.back(); // 폰 페이지: 열 때 넣은 기록을 되돌림
 });
 $('#vClose').onclick = () => viewer.close();
@@ -1830,7 +1856,7 @@ function openViewer(f) {
   // 폰(화면 캡처 없음): 드라이브 플레이어는 로그인 쿠키를 못 받아(사파리 크로스 사이트 추적 방지) G 로고에서 멈추므로, 파일을 직접 받아 기본 플레이어로 재생
   const iframe = canCapture ? drivePlayer() : directPlayer(f);
   // edit-only: 수정 모드(ON)에서만 보임
-  const captureBtn = el('button', { className: 'primary edit-only', textContent: CAPTURE_LABEL });
+  const captureBtn = el('button', { className: 'primary edit-only', textContent: window.mergePick && window.mergePick.f === f ? '이 지점으로 썸네일 설정' : CAPTURE_LABEL });
   captureBtn.onclick = () => captureFrame(f, iframe, captureBtn);
   const playerWrap = el('div', { className: 'player-wrap' }, iframe); // 영역 조절기가 이 위에 겹쳐 뜸
   // 폰(<video>): 재생 전에는 내가 정한 썸네일(없으면 드라이브 썸네일)을 영상 위에 띄움 → 누르면 재생
@@ -2787,6 +2813,11 @@ function openCropper(canvas) {
 // 그동안 플레이어 자리에 영역 조절기가 뜨고, [바꾸기]를 누르면 그 영역만 썸네일로 저장
 let restorePending = null; // [바꾸기] 대기 중이면 원래 버튼으로 되돌리는 함수
 function askThumb(f, canvas, btn) {
+  if (window.mergePick && window.mergePick.f === f) { // 합치기용 앞 1초 장면: 자르기 없이 그대로 넘기고 창 닫기
+    const pick = window.mergePick;
+    viewer.close();
+    return pick.done(canvas);
+  }
   if (restorePending) restorePending();
   const { textContent: label, className, onclick } = btn;
   const cancel = el('button', { textContent: '취소' });
