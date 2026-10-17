@@ -2230,6 +2230,8 @@ const focusOut = new Set(); // 잠시 뺀 영상 ID (다른 칸을 펼치면 초
 let focusKey = null, focusKind = 'normal';
 const focusAddTa = el('textarea', { placeholder: '태그를 쉼표로 구분해 적고 Enter → 위 영상들에 붙음' });
 const focusAddBtn = el('button', { className: 'primary done' });
+const focusRemoveTa = el('textarea', { placeholder: '뺄 태그를 쉼표로 구분해 적고 Enter → 위 영상들에서 빠짐' });
+const focusRemoveBtn = el('button', { className: 'primary done' });
 const focusKindTa = el('textarea', { placeholder: '위 영상들에 붙은 태그를 적고 Enter → 고른 종류로 바뀜' });
 const focusKindBtn = el('button', { className: 'primary done', textContent: '바꾸기' });
 const focusKindChips = el('div', { className: 'pills' });
@@ -2268,6 +2270,26 @@ focusKindBtn.onclick = () => {
 };
 memoKeys(focusAddTa, () => focusAddBtn.click());
 memoKeys(focusKindTa, () => focusKindBtn.click());
+// 이 영상들에서 태그 빼기 (잠시 뺀 영상은 그대로). 태그가 어느 영상에도 안 남아도 태그 자체는 0개로 남음
+focusRemoveBtn.onclick = () => {
+  focusRemoveTa.focus({ preventScroll: true });
+  const typed = parseTags(focusRemoveTa.value), targets = focusActive();
+  if (!typed.length || !targets.length || !document.body.classList.contains('editing')) return;
+  let n = 0;
+  for (const f of targets) {
+    const have = tagsOf(f), next = have.filter(t => !typed.includes(t));
+    if (next.length === have.length) continue;
+    if (next.length) gallery.tags[f.id] = next; else delete gallery.tags[f.id];
+    pendingSaves.set('t:' + f.id, next.length ? next : null);
+    n++;
+  }
+  keepTags(typed);
+  focusRemoveTa.value = '';
+  renderGrid();
+  flushSaves();
+  setStatus(n ? `영상 ${n}개에서 태그 ${typed.map(t => `(${t})`).join(' ')} 를 뺐어요.` : '적은 태그가 붙은 영상이 없어요.', !n);
+};
+memoKeys(focusRemoveTa, () => focusRemoveBtn.click(), { splitSpaces: false });
 function renderDirFocus() {
   const box = $('#dirFocus');
   const key = currentView && currentView !== 'title' ? DirectoryThumbs.current() : null;
@@ -2277,6 +2299,7 @@ function renderDirFocus() {
   const counts = tagCounts(), all = focusVideos(key), active = all.filter(f => !focusOut.has(f.id));
   const name = key.startsWith('tag:') ? key.slice(4) : ((gallery.series[key.slice(7)] || {}).name || '시리즈');
   focusAddBtn.textContent = `영상 ${active.length}개에 붙이기`;
+  focusRemoveBtn.textContent = `영상 ${active.length}개에서 빼기`;
   focusKindChips.replaceChildren(...directoryKinds.map(([k, label]) => {
     const b = el('button', { className: 'chip' + (k === focusKind ? ' on' : ''), textContent: label,
       onclick: () => { focusKind = k; renderDirFocus(); } });
@@ -2300,6 +2323,7 @@ function renderDirFocus() {
       focusOut.size ? el('button', { className: 'small', textContent: '모두 다시 넣기', onclick: () => { focusOut.clear(); renderDirFocus(); } }) : null),
     el('div', { className: 'cat-grid' }, ...cards),
     el('div', { className: 'm-sec' }, el('b', { textContent: '이 영상들에 태그 추가' }), el('div', { className: 'memo' }, focusAddTa, focusAddBtn)),
+    el('div', { className: 'm-sec' }, el('b', { textContent: '이 영상들에서 태그 빼기' }), el('div', { className: 'memo' }, focusRemoveTa, focusRemoveBtn)),
     el('div', { className: 'm-sec' }, el('b', { textContent: '이 영상들의 태그 종류 바꾸기' }), focusKindChips, el('div', { className: 'memo' }, focusKindTa, focusKindBtn)));
   if (scrollY !== prevScroll) scrollTo(0, prevScroll);
 }
