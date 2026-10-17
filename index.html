@@ -198,7 +198,7 @@
     header { flex-wrap: wrap; gap: 8px; }
     header h1 { flex: 1; font-size: 16px; }
     header button { padding: 6px 10px; font-size: 13px; }
-    #crumbs { order: 3; flex-basis: 100%; } /* "모든 영상 · N개"는 아랫줄로 */
+    #crumbs { order: 3; flex-basis: 100%; } /* 숨긴 영상·조건 버튼은 아랫줄로 */
   }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; cursor: pointer;
     text-align: left; padding: 0; display: flex; flex-direction: column; justify-content: flex-start; width: 100%; }
@@ -1459,9 +1459,10 @@ function renderGrid() {
   const editing = document.body.classList.contains('editing');
   const hiddenCount = items.filter(isHidden).length;
   const visible = items.filter(f => !isHidden(f) || (showHidden && editing));
-  $('#crumbs').replaceChildren(el('span', { textContent: `모든 영상 · ${items.length - hiddenCount}개` }));
-  if (hiddenCount) $('#crumbs').append(el('button', { className: 'edit-only small',
-    textContent: showHidden ? `🙈 숨긴 영상 ${hiddenCount}개 감추기` : `🙈 숨긴 영상 ${hiddenCount}개 보기`,
+  $('#crumbs').replaceChildren();
+  // 숨긴 영상 (N): 누르면 같이 보기(파란 버튼), 다시 누르면 감추기
+  if (hiddenCount) $('#crumbs').append(el('button', { className: 'edit-only small' + (showHidden ? ' primary' : ''),
+    textContent: `숨긴 영상 (${hiddenCount})`, title: showHidden ? '숨긴 영상 감추기' : '숨긴 영상도 같이 보기',
     onclick: () => { showHidden = !showHidden; renderGrid(); } }));
   // ☰ 메뉴 검색 조건이 걸려 있으면 위쪽에 표시 + 바로 지우기
   const nf = filterCount();
@@ -1488,13 +1489,13 @@ function renderGrid() {
     const starred = !SeriesUI.mode ? shown.filter(f => gallery.marks[f.id] === 'star') : [];
     const parts = [];
     if (favorites.length) parts.push(el('section', { id: 'favoriteVideos' },
-      el('h2', { textContent: '즐겨찾기' }),
+      el('h2', { textContent: `즐겨찾기 (${favorites.length})` }),
       el('div', { className: 'cat-grid' }, ...favorites.map(f => videoCard(f, counts)))), el('hr'));
     if (starred.length) parts.push(el('section', { id: 'starVideos' },
-      el('h2', { textContent: '추천' }),
+      el('h2', { textContent: `추천 (${starred.length})` }),
       el('div', { className: 'cat-grid' }, ...starred.map(f => videoCard(f, counts)))), el('hr'));
-    // 위에 즐겨찾기·추천 구역이 있으면 전체 목록에도 "동영상" 이름을 붙임
-    if (parts.length) regular.prepend(el('h2', { className: 'section-title', textContent: '동영상' }));
+    // 전체 목록 이름 + 개수 (위쪽 영상 개수 표시 대신)
+    regular.prepend(el('h2', { className: 'section-title', textContent: `동영상 (${shown.length})` }));
     $('#grid').replaceChildren(...parts, regular);
     ManualOrderUI.bind();
   }
