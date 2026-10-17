@@ -304,9 +304,11 @@ const MergeUI = (() => {
 
   // ---- 합친 뒤 번호 다시 매기기 ----
   // "마리오 1~8" 중 1~3 을 합치면 남은 4~8 → 1~5. 합친 영상 이름이 같은 앞부분에 번호(예: 마리오1)면 그 번호는 비워 두고 나머지를 채움 → 2~6
+  // 눈에 안 보이는 글자(끝 공백, 폭 없는 공백, 전각 숫자 １ 등)가 있어도 "숫자로 끝나는 제목"으로 알아보게 정리한 뒤 나눔
+  const clean = s => String(s).normalize('NFKC').replace(/[\u200b-\u200d\u2060\ufeff]/g, '').replace(/\s+$/, '');
   function titleParts(name) {
-    const m = String(name).match(/^(.*?)(.[^.]+)?$/);
-    const base = m[1], ext = m[2] || '';
+    const m = clean(name).match(/^(.*?)(\.[^.\s]+)?$/);
+    const base = m[1].replace(/\s+$/, ''), ext = m[2] || '';
     const n = base.match(/^(.*?)([0-9]+)$/);
     return { stem: n ? n[1] : base, key: (n ? n[1] : base).normalize('NFKC').toLowerCase().trim(), number: n ? Number(n[2]) : null, ext };
   }
@@ -330,6 +332,7 @@ const MergeUI = (() => {
   }
   // 자동 정렬: 같은 제목 앞부분에 번호가 붙은 영상이 2개 이상이면 번호를 1부터 빈칸 없이 (3~7 → 1~5, 1·4~8 → 1~6).
   // 번호가 없는 제목엔 붙이지 않고, 번호 붙은 영상이 하나뿐인 제목(예: "아이폰 15")은 그대로 둠
+  let lastGroups = 0; // 마지막으로 살펴본 "같은 제목 번호 묶음" 수 (안내용)
   function gapPlans() {
     const fams = new Map();
     for (const f of items) {
@@ -339,8 +342,10 @@ const MergeUI = (() => {
       fams.get(p.key).push({ f, p });
     }
     const plans = [];
+    lastGroups = 0;
     for (const list of fams.values()) {
       if (list.length < 2) continue;
+      lastGroups++;
       list.sort((a, b) => a.p.number - b.p.number || GalleryOrder.compareText(a.f.name, b.f.name));
       list.forEach(({ f, p }, i) => { const name = p.stem + (i + 1) + p.ext; if (name !== f.name) plans.push({ f, name }); });
     }
@@ -475,5 +480,5 @@ const MergeUI = (() => {
     }
   }
 
-  return { gapPlans, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
+  return { gapPlans, get lastGroups() { return lastGroups; }, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
 })();

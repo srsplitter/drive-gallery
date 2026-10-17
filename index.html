@@ -512,15 +512,15 @@
   <div class="m-body" id="mBody"></div>
 </dialog>
 
-<script src="gallery-order.js?v=20261017-renum2"></script>
-<script src="manual-order.js?v=20261017-renum2"></script>
-<script src="series.js?v=20261017-renum2"></script>
-<script src="series-ui.js?v=20261017-renum2"></script>
-<script src="title-editor.js?v=20261017-renum2"></script>
-<script src="directory-thumbs.js?v=20261017-renum2"></script>
+<script src="gallery-order.js?v=20261017-renum4"></script>
+<script src="manual-order.js?v=20261017-renum4"></script>
+<script src="series.js?v=20261017-renum4"></script>
+<script src="series-ui.js?v=20261017-renum4"></script>
+<script src="title-editor.js?v=20261017-renum4"></script>
+<script src="directory-thumbs.js?v=20261017-renum4"></script>
 <script src="branding.js?v=20261017-safari3"></script>
-<script src="video-merge.js?v=20261017-renum2"></script>
-<script src="merge-ui.js?v=20261017-renum2"></script>
+<script src="video-merge.js?v=20261017-renum4"></script>
+<script src="merge-ui.js?v=20261017-renum4"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -1239,7 +1239,7 @@ $('#menuBtn').onclick = () => (menu.open && menu.classList.contains('in') ? clos
 $('#autoSortBtn').onclick = async () => {
   ManualOrderUI.autoSort();
   const plans = MergeUI.gapPlans();
-  if (!plans.length) return toast('정렬했어요. 당길 빈 번호는 없어요.');
+  if (!plans.length) return toast(`정렬했어요. 같은 제목 번호 묶음 ${MergeUI.lastGroups}개를 살펴봤는데 당길 빈 번호는 없어요.`);
   const ex = plans[0];
   if (!await confirmBox(`번호가 비어 있는 제목 ${plans.length}개의 번호를 1부터 빈칸 없이 당길까요? (예: "${ex.f.name}" → "${ex.name}") 드라이브 파일 이름이 바뀌어요.`, '바꾸기', false)) return;
   if (!await ensureWriteScope()) return;
