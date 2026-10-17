@@ -265,6 +265,16 @@
   .merge-cut { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 13px; }
   .merge-cut img { width: 48px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
   .merge-cut.set { border-color: var(--accent); }
+  /* 담은 영상들이 갖고 있던 썸네일 — 누르면 앞 1초 장면으로 */
+  .merge-choices { display: flex; flex-wrap: wrap; gap: 4px; }
+  .merge-choice { padding: 2px; border-radius: 6px; line-height: 0; }
+  .merge-choice img { width: 52px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; display: block; }
+  .merge-choice.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+  /* 편집 중: 화면 아래 가운데 맨 위로 (네모 버튼) */
+  #mergeTop { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 20;
+    width: 48px; height: 48px; padding: 0; border-radius: 10px; display: grid; place-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+  #mergeTop[hidden] { display: none; }
+  .up-ico { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
   .scissors-ico { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
   .merge-item-btns { gap: 4px; } .merge-item-btns button.small { margin-left: 0; }
   .card.merge-picked .thumb { outline: 3px solid var(--accent); outline-offset: -3px; }

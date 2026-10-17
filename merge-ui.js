@@ -34,6 +34,7 @@ const MergeUI = (() => {
   function pickIntro(p) {
     window.mergePick = { f: p.f, done: canvas => {
       p.intro = canvas;
+      p.introKey = null;
       try { p.introUrl = canvas.toDataURL('image/jpeg', 0.7); } catch { p.introUrl = ''; }
       window.mergePick = null;
       renderGrid();
@@ -42,6 +43,15 @@ const MergeUI = (() => {
   }
 
   const NS = 'http://www.w3.org/2000/svg';
+  function upArrow() { // 위쪽 화살표 (선)
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'up-ico');
+    const p = document.createElementNS(NS, 'path');
+    p.setAttribute('d', 'M12 19V5M5 12l7-7 7 7');
+    svg.append(p);
+    return svg;
+  }
   function scissors() { // 가위 아이콘 (선)
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
@@ -53,6 +63,11 @@ const MergeUI = (() => {
       svg.append(n);
     }
     return svg;
+  }
+  // 담은 영상들이 갖고 있던 지정 썸네일 (같은 화면 출처라 캔버스에 그려도 됨 — 드라이브 기본 썸네일은 다른 출처라 못 씀)
+  function ownedThumbs() {
+    return picks.map(p => ({ key: p.f.id, name: p.f.name, c: gallery.videos[p.f.id] })).filter(o => o.c && (o.c.thumb || o.c.file))
+      .map(o => ({ key: o.key, name: o.name, url: o.c.thumb ? Promise.resolve(o.c.thumb) : thumbUrl(o.c.file) }));
   }
   function thumbOf(f) {
     const custom = gallery.videos[f.id];
@@ -66,6 +81,13 @@ const MergeUI = (() => {
   function panel() {
     const box = $('#mergePanel');
     box.hidden = !active;
+    let top = $('#mergeTop');
+    if (!top) {
+      top = el('button', { id: 'mergeTop', title: '맨 위로', onclick: () => scrollTo({ top: 0, behavior: 'smooth' }) }, upArrow());
+      top.setAttribute('aria-label', '맨 위로');
+      document.body.append(top);
+    }
+    top.hidden = !active;
     if (!active) return;
     if (running) return; // 진행 중엔 진행 표시를 그대로 둠
     const nameIn = el('input', { className: 'm-in', placeholder: '합친 영상 이름 (예: 겨울왕국 모음)', value: nameDraft,
@@ -74,14 +96,29 @@ const MergeUI = (() => {
       const move = d => () => { const j = i + d; if (j < 0 || j >= picks.length) return; [picks[i], picks[j]] = [picks[j], picks[i]]; renderGrid(); };
       const cut = el('button', { className: 'merge-cut' + (p.intro ? ' set' : ''), title: '이 영상 앞 1초에 넣을 장면 고르기', onclick: () => pickIntro(p) },
         p.introUrl ? el('img', { src: p.introUrl, alt: '' }) : scissors(), el('span', { textContent: p.intro ? '앞 1초 장면' : '앞 1초 장면 고르기' }));
+      const owned = ownedThumbs();
+      const choices = owned.length ? el('div', { className: 'merge-choices' }, ...owned.map(o => {
+        const img = el('img', { alt: '', title: o.name + ' 의 썸네일' });
+        o.url.then(u => { img.src = u; }, () => img.parentElement && img.parentElement.remove());
+        const b = el('button', { className: 'merge-choice' + (p.introKey === o.key ? ' on' : ''), title: '이 썸네일을 앞 1초 장면으로',
+          onclick: async () => {
+            const u = await o.url;
+            const im = new Image();
+            await new Promise((ok, bad) => { im.onload = ok; im.onerror = () => bad(new Error('썸네일을 불러오지 못했어요')); im.src = u; });
+            Object.assign(p, { intro: im, introUrl: u, introKey: o.key });
+            renderGrid();
+          } }, img);
+        return b;
+      })) : null;
       return el('div', { className: 'merge-item' },
         el('div', { className: 'merge-thumb' }, thumbOf(p.f), el('span', { className: 'series-order-badge', textContent: String(i + 1) })),
         el('div', { className: 'merge-name', textContent: p.f.name, title: p.f.name }),
         cut,
+        choices,
         el('div', { className: 'row merge-item-btns' },
           el('button', { className: 'small', textContent: '◀', title: '앞으로', disabled: i === 0, onclick: move(-1) }),
           el('button', { className: 'small', textContent: '▶', title: '뒤로', disabled: i === picks.length - 1, onclick: move(1) }),
-          p.intro ? el('button', { className: 'small', textContent: '장면 빼기', onclick: () => { p.intro = null; p.introUrl = ''; renderGrid(); } }) : null,
+          p.intro ? el('button', { className: 'small', textContent: '장면 빼기', onclick: () => { p.intro = null; p.introUrl = ''; p.introKey = null; renderGrid(); } }) : null,
           el('button', { className: 'small', textContent: '빼기', onclick: () => toggle(p.f) })));
     }));
     const go = el('button', { className: 'primary m-big', textContent: `${picks.length}개 합치기`, disabled: picks.length < 2, onclick: start });
@@ -224,7 +261,13 @@ const MergeUI = (() => {
       items.unshift({ ...made, category: first.category });
       // 원본들이 갖고 있던 태그를 합쳐 붙임 (같은 태그는 한 번만, 원본 순서대로)
       const tags = [...new Set(list.flatMap(p => tagsOf(p.f)))];
-      if (tags.length) { gallery.tags[made.id] = tags; pendingSaves.set('t:' + made.id, tags); flushSaves(); }
+      if (tags.length) { gallery.tags[made.id] = tags; pendingSaves.set('t:' + made.id, tags); }
+      // 하트: 하나라도 있으면 하트. 표시: 별이 하나라도 있으면 별, 아니면 네모가 있으면 네모
+      if (list.some(p => isLoved(p.f))) { gallery.loved[made.id] = true; pendingSaves.set('l:' + made.id, true); }
+      const marks = list.map(p => gallery.marks[p.f.id]);
+      const mark = marks.includes('star') ? 'star' : marks.includes('square') ? 'square' : null;
+      if (mark) { gallery.marks[made.id] = mark; pendingSaves.set('m:' + made.id, mark); }
+      flushSaves();
       picks = [];
       nameDraft = '';
       active = false;
