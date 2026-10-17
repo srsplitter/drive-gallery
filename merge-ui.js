@@ -15,7 +15,7 @@ const MergeUI = (() => {
   const reserved = () => new Set(unfinished().flatMap(j => j.list.map(p => p.f.id)));
   let picks = []; // [{ f }] 담은 순서
   let intro = null; // 합친 영상 맨 앞 1초 장면 { img: 캔버스·이미지, url: 미리보기, key: 고른 썸네일의 영상 ID | null(가위로 찍음) }
-  let nameDraft = '';
+  let nameDraft = '', nameError = ''; // nameError: 이름 칸 아래 빨간 안내
   const isPC = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && 'VideoEncoder' in window;
 
   function toggleMode() {
@@ -99,7 +99,8 @@ const MergeUI = (() => {
     top.hidden = !active;
     if (!active) { if (jobs.length) box.replaceChildren(jobsView()); return; }
     const nameIn = el('input', { className: 'm-in', placeholder: '합친 영상 이름 (예: 겨울왕국 모음)', value: nameDraft,
-      oninput: () => { nameDraft = nameIn.value; } });
+      oninput: () => { nameDraft = nameIn.value; if (nameError) { nameError = ''; nameErr.remove(); } } });
+    const nameErr = el('p', { className: 'hint error', textContent: nameError });
     // 0번 칸: 합친 영상 맨 앞 1초 장면 (고른 경우에만)
     const zero = intro ? el('div', { className: 'merge-item merge-zero' },
       el('div', { className: 'merge-thumb' }, el('img', { src: intro.url, alt: '' }), el('span', { className: 'series-order-badge', textContent: '0' })),
@@ -142,7 +143,7 @@ const MergeUI = (() => {
         el('span', { className: 'hint', textContent: '검색·필터로 영상을 찾고 썸네일을 누른 순서대로 담겨요. 다시 누르면 빠져요.' })),
       picks.length ? list : el('p', { className: 'hint', textContent: '아직 담은 영상이 없어요.' }),
       introSec,
-      el('div', { className: 'm-sec' }, el('b', { textContent: '합친 영상 이름' }), nameIn),
+      el('div', { className: 'm-sec' }, el('b', { textContent: '합친 영상 이름' }), nameIn, ...(nameError ? [nameErr] : [])),
       el('p', { className: 'hint', textContent: '합친 영상은 첫 영상이 있는 드라이브 폴더에 올라가고, 다 올라간 걸 확인한 뒤 원본은 드라이브 휴지통으로 옮겨져요(30일 안에 복원 가능). 해상도는 첫 영상에 맞추고, 합치는 동안 이 탭을 열어 두세요.' }),
       isPC() ? null : el('p', { className: 'hint error', textContent: '영상 합치기는 PC 크롬·엣지에서만 돼요.' }),
       el('div', { className: 'row' }, go, el('button', { textContent: '닫기', onclick: toggleMode })),
@@ -243,7 +244,8 @@ const MergeUI = (() => {
     if (picks.length < 2) return;
     if (!isPC()) return setStatus('영상 합치기는 PC 크롬·엣지에서만 돼요.', true);
     let name = (nameDraft || '').trim();
-    if (!name) return setStatus('합친 영상 이름을 적어 주세요.', true);
+    if (!name) { nameError = '합친 영상 이름을 적어야 합칠 수 있어요.'; renderGrid(); $('#mergePanel .m-in')?.focus(); return; }
+    nameError = '';
     if (!/\.mp4$/i.test(name)) name += '.mp4';
     if (picks.some(p => !(+p.f.size > 0))) return setStatus('크기 정보가 없는 영상이 있어 합칠 수 없어요.', true);
     const taken = reserved();
