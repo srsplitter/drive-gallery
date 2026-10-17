@@ -1,6 +1,6 @@
 // 영상 합치기 엔진 (PC 크롬·엣지). 서버 없이 이 브라우저가 직접:
 //   각 영상을 조금씩 읽어(read) → 풀고(디코딩) → [썸네일 1초] + 영상을 차례로 이어 → 다시 압축(H.264 + AAC) →
-//   조금씩 writable 로 흘려보냄(fragmented MP4 = 앞에서부터 이어 쓰기만 하는 형식이라 드라이브에 나눠 올리기 가능).
+//   표준 MP4 를 조금씩 writable 로 흘려보냄(위치 지정 쓰기 — 화면 쪽이 브라우저 임시 파일에 받아 둔 뒤 드라이브에 올림).
 // 해상도는 첫 영상에 맞추고, 다른 크기·회전 영상은 검은 여백을 두고 가운데에 맞춤.
 // 시간 이어 붙이기는 WebAV fastConcatMP4 처럼 "각 영상의 첫 시간을 0으로 맞춘 뒤 지금까지의 길이를 더함".
 // 영상·소리 길이가 다르면 짧은 쪽 뒤를 비워 두지 않고 소리는 무음으로 채워 다음 영상과 어긋나지 않게 함.
@@ -41,9 +41,11 @@ const VideoMerge = (() => {
     if (!await MB.canEncodeVideo('avc', { width: W, height: H, bitrate }))
       throw new Error(`이 PC 에서는 ${W}×${H} H.264 로 다시 압축할 수 없어요.`);
     const acodec = await MB.canEncodeAudio('aac', { numberOfChannels: CH, sampleRate: RATE, bitrate: 192e3 }) ? 'aac' : 'opus';
+    // 표준 MP4(색인 moov 은 끝에). 조각 MP4(fragmented)는 아이폰이 앞 몇 조각만 보고 길이를 잘못 아는 일이 있어 쓰지 않음.
+    // writable 은 { data, position } 을 받아 그 위치에 씀(파일 앞부분 길이 칸을 마지막에 다시 씀)
     const output = new MB.Output({
-      format: new MB.Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 2 }),
-      target: new MB.AppendOnlyStreamTarget(writable),
+      format: new MB.Mp4OutputFormat({ fastStart: false }),
+      target: new MB.StreamTarget(writable, { chunked: true, chunkSize: 8 * 2 ** 20 }),
     });
     const vsrc = new MB.VideoSampleSource({ codec: 'avc', quality: new MB.Quality({ bitrate }), keyFrameInterval: 2 });
     const asrc = new MB.AudioSampleSource({ codec: acodec, quality: new MB.Quality({ bitrate: 192e3 }) });

@@ -121,56 +121,47 @@ const MergeUI = (() => {
     }
   };
 
-  // ---- 드라이브에 조금씩 올리기 (재개 가능 업로드). 조각은 256KB 배수, 드라이브가 위치를 확인함 ----
+  // ---- 합친 파일은 먼저 이 브라우저의 임시 저장공간(OPFS)에 표준 MP4 로 다 만듦 ----
+  // (MP4 는 끝난 뒤 파일 앞쪽의 길이 칸을 다시 써야 해서, 드라이브에 바로 이어 올릴 수 없음)
+  const TMP = 'merge-tmp.mp4';
+  async function tempFile() {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle(TMP, { create: true });
+    const ws = await handle.createWritable();
+    const writable = new WritableStream({
+      write: chunk => ws.write({ type: 'write', position: chunk.position, data: chunk.data }),
+      close: () => ws.close(),
+      abort: () => ws.abort(),
+    });
+    return { writable, file: () => handle.getFile(), remove: () => root.removeEntry(TMP).catch(() => {}) };
+  }
+
+  // ---- 다 만든 파일을 드라이브에 8MB 씩 올리기 (재개 가능 업로드). 조각은 256KB 배수, 드라이브가 위치를 확인함 ----
   const UNIT = 256 * 1024, CHUNK = 32 * UNIT; // 8MB
-  async function driveUpload(meta, onSent, signal) {
+  async function driveUpload(meta, blob, onSent, signal) {
     const r = await api(`${UPLOAD}/files?uploadType=resumable&fields=id,name,size,mimeType,parents,thumbnailLink,videoMediaMetadata(durationMillis)`, {
       method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'video/mp4' },
+      headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': 'video/mp4', 'X-Upload-Content-Length': String(blob.size) },
       body: JSON.stringify(meta) });
     const url = r.headers.get('Location');
     if (!url) throw new Error('드라이브 업로드 주소를 받지 못했어요.');
     running.url = url;
-    let parts = [], buffered = 0, sent = 0, result = null;
-    const take = n => { // 앞에서 n 바이트를 한 덩어리로
-      const out = new Uint8Array(n);
-      let at = 0;
-      while (at < n) {
-        const p = parts[0], k = Math.min(p.length, n - at);
-        out.set(p.subarray(0, k), at);
-        at += k;
-        if (k === p.length) parts.shift(); else parts[0] = p.subarray(k);
-      }
-      buffered -= n;
-      return out;
-    };
-    async function put(bytes, final) {
-      const total = final ? sent + bytes.length : '*';
-      const range = bytes.length ? `bytes ${sent}-${sent + bytes.length - 1}/${total}` : `bytes */${total}`;
+    let result = null;
+    for (let sent = 0; sent < blob.size;) {
+      const end = Math.min(sent + CHUNK, blob.size);
+      const bytes = blob.slice(sent, end);
       for (let tries = 0; ; tries++) {
         let res;
-        try { res = await fetch(url, { method: 'PUT', headers: { 'Content-Range': range }, body: bytes, signal }); }
+        try { res = await fetch(url, { method: 'PUT', headers: { 'Content-Range': `bytes ${sent}-${end - 1}/${blob.size}` }, body: bytes, signal }); }
         catch (e) { if (signal.aborted || tries >= 4) throw e; await sleep(2000 * (tries + 1)); continue; }
-        if (res.status === 308 || res.ok) {
-          if (res.ok) result = await res.json();
-          sent += bytes.length;
-          onSent(sent);
-          return;
-        }
+        if (res.status === 308 || res.ok) { if (res.ok) result = await res.json(); break; }
         if (res.status >= 500 && tries < 4) { await sleep(2000 * (tries + 1)); continue; }
         throw new Error(`드라이브 업로드 실패 (${res.status})`);
       }
+      sent = end;
+      onSent(sent);
     }
-    const writable = new WritableStream({
-      async write(chunk) {
-        const d = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-        parts.push(d.slice()); // 엔진이 버퍼를 다시 쓸 수 있으니 복사
-        buffered += d.length;
-        while (buffered >= CHUNK) await put(take(CHUNK), false);
-      },
-      async close() { await put(take(buffered), true); },
-    });
-    return { writable, result: () => result, sent: () => sent };
+    return result;
   }
 
   // ---- 합치기 ----
@@ -191,21 +182,31 @@ const MergeUI = (() => {
       el('p', { className: 'hint', textContent: '이 탭을 닫거나 새로고침하면 처음부터 다시 해야 해요. 원본은 다 올라간 뒤에만 휴지통으로 옮겨져요.' }), cancel);
     const guard = e => { e.preventDefault(); e.returnValue = ''; };
     addEventListener('beforeunload', guard);
-    let prog = { done: 0, total: 1, part: 0 }, up = 0;
+    // 진행률: 합치기 0~70%, 올리기 70~100%
+    let prog = { done: 0, total: 1, part: 0 }, up = 0, upTotal = 0;
     const show = () => {
-      const pct = Math.min(100, prog.done / prog.total * 100);
+      const pct = upTotal ? 70 + 30 * up / upTotal : Math.min(70, 70 * prog.done / prog.total);
       bar.firstChild.style.width = pct.toFixed(1) + '%';
-      label.textContent = `${pct.toFixed(0)}% · ${prog.part + 1}/${list.length}번째 영상 · 올림 ${(up / 1e6).toFixed(0)}MB`;
+      label.textContent = upTotal ? `${pct.toFixed(0)}% · 드라이브에 올리는 중 ${(up / 1e6).toFixed(0)} / ${(upTotal / 1e6).toFixed(0)}MB`
+        : `${pct.toFixed(0)}% · ${prog.part + 1}/${list.length}번째 영상 합치는 중`;
     };
+    let tmp = null;
     try {
       const first = list[0].f;
-      const upload = await driveUpload({ name, mimeType: 'video/mp4', parents: (first.parents || []).slice(0, 1) }, n => { up = n; show(); }, ctrl.signal);
+      // 임시 저장공간이 넉넉한지 (합친 영상은 대략 원본 합보다 조금 클 수 있음)
+      const need = list.reduce((s, p) => s + +p.f.size, 0) * 1.3;
+      const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
+      if (est && est.quota - est.usage < need) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(need / 1e9).toFixed(1)}GB)`);
+      tmp = await tempFile();
       await VideoMerge.merge({
         parts: list.map(p => ({ name: p.f.name, size: +p.f.size, read: driveRead(p.f, ctrl.signal), intro: p.intro })),
-        writable: upload.writable, signal: ctrl.signal, onProgress: p => { prog = p; show(); },
+        writable: tmp.writable, signal: ctrl.signal, onProgress: p => { prog = p; show(); },
       });
-      const made = upload.result();
-      if (!made || !made.id || +made.size !== upload.sent()) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요. 원본은 그대로 두었어요.');
+      const blob = await tmp.file();
+      upTotal = blob.size;
+      show();
+      const made = await driveUpload({ name, mimeType: 'video/mp4', parents: (first.parents || []).slice(0, 1) }, blob, n => { up = n; show(); }, ctrl.signal);
+      if (!made || !made.id || +made.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요. 원본은 그대로 두었어요.');
       running.url = null;
       // 다 올라간 걸 확인함 → 원본을 휴지통으로 (실패한 건 그대로 둠)
       label.textContent = '다 올렸어요. 원본을 휴지통으로 옮기는 중…';
@@ -234,6 +235,7 @@ const MergeUI = (() => {
       setStatus(e.name === 'AbortError' ? '합치기를 취소했어요. 원본은 그대로예요.' : '합치지 못했어요: ' + e.message + ' (원본은 그대로예요)', e.name !== 'AbortError');
     } finally {
       removeEventListener('beforeunload', guard);
+      if (tmp) tmp.remove(); // 임시 파일은 늘 지움
     }
   }
 
