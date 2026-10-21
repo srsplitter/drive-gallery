@@ -89,7 +89,7 @@ const MergeUI = (() => {
 
   function panel() {
     const box = $('#mergePanel');
-    box.hidden = !active && !jobs.length;
+    box.hidden = !active && !jobs.length && !DecensorUI.running;
     let top = $('#mergeTop');
     if (!top) {
       top = el('button', { id: 'mergeTop', title: '맨 위로', onclick: () => scrollTo({ top: 0, behavior: 'smooth' }) }, upArrow());
@@ -97,7 +97,8 @@ const MergeUI = (() => {
       document.body.append(top);
     }
     top.hidden = !active;
-    if (!active) { if (jobs.length) box.replaceChildren(jobsView()); return; }
+    // 편집을 닫아도 진행 중인 합치기 작업·모자이크 해제는 보이게
+    if (!active) { if (jobs.length || DecensorUI.running) box.replaceChildren(...[jobs.length ? jobsView() : null, DecensorUI.running ? DecensorUI.section() : null].filter(Boolean)); return; }
     const nameIn = el('input', { className: 'm-in', placeholder: '합친 영상 이름 (예: 겨울왕국 모음)', value: nameDraft,
       oninput: () => { nameDraft = nameIn.value; if (nameError) { nameError = ''; nameErr.remove(); } } });
     const nameErr = el('p', { className: 'hint error', textContent: nameError });
@@ -147,7 +148,8 @@ const MergeUI = (() => {
       el('p', { className: 'hint', textContent: '합친 영상은 첫 영상이 있는 드라이브 폴더에 올라가고, 다 올라간 걸 확인한 뒤 원본은 드라이브 휴지통으로 옮겨져요(30일 안에 복원 가능). 해상도는 첫 영상에 맞추고, 합치는 동안 이 탭을 열어 두세요.' }),
       isPC() ? null : el('p', { className: 'hint error', textContent: '영상 합치기는 PC 크롬·엣지에서만 돼요.' }),
       el('div', { className: 'row' }, go, el('button', { textContent: '닫기', onclick: toggleMode })),
-      jobs.length ? jobsView() : null].filter(Boolean));
+      jobs.length ? jobsView() : null,
+      DecensorUI.section()].filter(Boolean));
   }
 
   // ---- 드라이브에서 조금씩 읽기 (로그인이 만료되면 다시 로그인할 때까지 기다렸다 이어서) ----
@@ -203,7 +205,7 @@ const MergeUI = (() => {
       for await (const name of root.keys()) {
         // 크롬이 쓰는 중에 옆에 두는 .crswap 은 본 파일 이름의 잠금으로 판단 (다른 탭이 쓰는 중이면 건드리지 않음)
         const base = name.replace(/\.crswap$/, '');
-        if (/^(merge|fix)-/.test(base) && !held.has(lockName(base))) await root.removeEntry(name).catch(() => {});
+        if (/^(merge|fix|lada)-/.test(base) && !held.has(lockName(base))) await root.removeEntry(name).catch(() => {});
       }
     } catch {}
   }
@@ -480,5 +482,7 @@ const MergeUI = (() => {
     }
   }
 
-  return { gapPlans, get lastGroups() { return lastGroups; }, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
+  // 모자이크 해제(decensor-ui.js)도 같은 드라이브 읽기·임시 파일·덮어 올리기를 씀
+  const tools = { driveRead, withTemp, driveUpload, waitLogin };
+  return { tools, gapPlans, get lastGroups() { return lastGroups; }, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
 })();
