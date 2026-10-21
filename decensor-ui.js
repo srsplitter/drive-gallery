@@ -30,6 +30,21 @@ const DecensorUI = (() => {
     return helperOk;
   }
 
+  // [도우미 켜기]: lada-helper:// 주소를 열면 Windows 가 PC 의 도우미를 켬(tools/register-protocol.ps1 로 한 번 등록).
+  // 크롬이 "열까요?"를 물으면 허용. 켜지는 데 몇 초 걸리므로 30초 동안 2초마다 확인
+  let launching = false;
+  async function launch() {
+    if (launching) return;
+    launching = true;
+    if (currentView === 'mosaic') renderGrid();
+    el('a', { href: 'lada-helper://start' }).click();
+    try {
+      for (let i = 0; i < 15; i++) { await sleep(2000); if (await checkHelperQuiet()) break; }
+    } finally { launching = false; }
+    if (helperOk) pump(); else setStatus('도우미가 켜지지 않았어요. 처음이면 tools\\register-protocol.ps1 로 등록했는지 확인해 주세요.', true);
+    if (currentView === 'mosaic') renderGrid();
+  }
+
   // ---- 대기열 ----
   function add(f) {
     if (jobOf(f)) return;
@@ -174,11 +189,12 @@ const DecensorUI = (() => {
     if (helperOk === null) checkHelper();
     const free = list.filter(f => !jobOf(f) && !inMerge(f));
     const status = el('p', { className: 'hint' + (helperOk === false ? ' error' : ''), textContent: helperOk === null ? '도우미 확인 중…'
-      : helperOk ? '이 PC 의 도우미와 연결됨' : '도우미가 꺼져 있어요. PC 에서 tools\\lada-helper.bat 을 켠 뒤 [도우미 다시 확인]을 눌러 주세요. 대기열은 그대로 기다려요.' });
+      : helperOk ? '이 PC 의 도우미와 연결됨' : launching ? '도우미를 켜는 중… (크롬이 열지 물으면 허용)' : '도우미가 꺼져 있어요. [도우미 켜기]를 누르세요. 대기열은 그대로 기다려요.' });
     const panel = el('div', { className: 'm-sec decensor' },
       el('b', { textContent: '모자이크 해제 (Lada)' }), status,
       el('div', { className: 'row' },
         el('button', { className: 'primary edit-only', textContent: `대기열에 모두 넣기 (${free.length})`, disabled: !free.length, onclick: () => addAll(free) }),
+        helperOk === false ? el('button', { className: 'primary', textContent: '도우미 켜기', disabled: launching, onclick: launch }) : null,
         el('button', { className: 'small', textContent: '도우미 다시 확인', onclick: checkHelper })),
       el('p', { className: 'hint', textContent: editing()
         ? '카드를 누르면 대기열에 넣고, 다시 누르면 빼요. 작업은 하나씩 차례로 돌고, 도는 동안에도 계속 넣을 수 있어요. 끝난 영상은 같은 드라이브 파일에 덮어쓰고(드라이브에 원본이 이전 버전으로 30일 남음) "모자이크" 태그를 떼요. 얼굴 모자이크는 건드리지 않아요. 처리하는 동안 이 탭과 PC 의 도우미 창을 켜 두세요.'
