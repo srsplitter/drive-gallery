@@ -73,7 +73,29 @@ const DecensorUI = (() => {
   }
   function cancel(job) {
     if (job.state === 'waiting') { job.state = 'canceled'; job.show(0, '대기열에서 뺐어요.'); }
-    else if (job.state === 'running') job.ctrl.abort();
+    else if (job.state === 'running') {
+      job.ctrl.abort();
+      // 올리기 차례를 기다리던 작업은 도는 코드가 없으므로 여기서 바로 끝냄
+      const at = finishQ.indexOf(job);
+      if (at >= 0) { finishQ.splice(at, 1); end(job, 'canceled', '취소했어요. 원본은 그대로예요.'); }
+    }
+  }
+
+  // ---- 세 줄로 따로 돎 ----
+  // 1) 보내기: 대기 중인 영상을 드라이브에서 읽어 도우미에 미리 넘김 (로그인 필요). 도우미 디스크를 너무 차지하지 않게 앞서 넘긴 양을 제한
+  // 2) Lada: 도우미가 받은 순서대로 하나씩 처리 (로그인과 무관 — 로그인이 끊겨도 넘겨 둔 것은 계속 처리)
+  // 3) 올리기: 처리가 끝난 것부터 하나씩 결과를 받아 같은 드라이브 파일에 덮어씀 (로그인 필요 — 끊기면 여기만 기다림)
+  const AHEAD_COUNT = 8, AHEAD_BYTES = 12e9;
+  const finishQ = []; // Lada 가 끝나 올리기를 기다리는 작업
+  const onWaitOf = job => on => { if (on) job.show(undefined, '로그인 시간이 끝나 기다리는 중 — 위쪽 🔑 다시 로그인을 누르면 이어서 해요 (Lada 는 계속 처리 중)'); };
+  const errText = e => (e.name === 'AbortError' ? '취소했어요.' : '실패: ' + e.message) + ' 원본은 그대로예요.';
+  function end(job, state, text) {
+    if (job.state !== 'running') return;
+    job.state = state;
+    job.show(state === 'done' ? 100 : undefined, text);
+    if (job.hid) { fetch(`${HELPER}/jobs/${job.hid}`, { method: 'DELETE' }).catch(() => {}); job.hid = null; }
+    renderGrid();
+    pump(); // 자리가 났으니 다음 영상을 넘김
   }
 
   let pumping = false;
@@ -82,20 +104,18 @@ const DecensorUI = (() => {
     pumping = true;
     try {
       for (let job; (job = jobs.find(j => j.state === 'waiting'));) {
+        // 도우미에 넘겨 두고 아직 올리기 전인 작업이 많으면, 하나가 올라가 자리가 날 때까지 멈춤
+        const ahead = jobs.filter(j => j.state === 'running' && !j.uploading);
+        if (ahead.length >= AHEAD_COUNT || (ahead.length && ahead.reduce((s, j) => s + +j.f.size, 0) + +job.f.size > AHEAD_BYTES)) break;
         if (!await checkHelperQuiet()) break; // 도우미가 꺼져 있으면 기다림 (켜고 [도우미 다시 확인]을 누르면 이어서)
-        job.state = 'running';
-        job.ctrl = new AbortController();
+        if (job.state !== 'waiting') continue; // 그사이 대기열에서 뺐음
+        Object.assign(job, { state: 'running', ctrl: new AbortController(), hid: null, uploading: false });
         job.show(0, '시작');
         if (currentView === 'mosaic') renderGrid();
         try {
-          await processOne(job);
-          job.state = 'done';
-          job.show(100, '끝났어요. "모자이크" 태그를 뗐어요.');
-        } catch (e) {
-          job.state = e.name === 'AbortError' ? 'canceled' : 'failed';
-          job.show(undefined, (e.name === 'AbortError' ? '취소했어요.' : '실패: ' + e.message) + ' 원본은 그대로예요.');
-        }
-        renderGrid();
+          await send(job);
+          watch(job); // Lada 진행을 따로 지켜봄 → 끝나면 올리기 줄로
+        } catch (e) { end(job, e.name === 'AbortError' ? 'canceled' : 'failed', errText(e)); }
       }
     } finally { pumping = false; }
   }
@@ -105,62 +125,76 @@ const DecensorUI = (() => {
     return helperOk;
   }
 
-  // ---- 작업 하나 ----
-  async function processOne(job) {
-    const { f, ctrl: { signal } } = job;
-    const { driveRead, withTemp, driveUpload, waitLogin } = MergeUI.tools;
-    const size = +f.size;
-    // 로그인이 끝나면 드라이브 읽기·올리기만 멈추고 기다림 (Lada 처리는 PC 에서 계속). 다시 로그인하면 이어서
-    const onWait = on => { if (on) job.show(undefined, '로그인 시간이 끝나 기다리는 중 — 위쪽 🔑 다시 로그인을 누르면 이어서 해요'); };
+  // 1) 드라이브 → 도우미 (0~20%)
+  async function send(job) {
+    const { f, ctrl: { signal } } = job, size = +f.size;
     const { id } = await (await hx('/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size }), signal })).json();
-    const upload = { url: null };
-    try {
-      // 1) 드라이브 → 도우미 (0~20%)
-      const read = driveRead(f, signal, onWait);
-      for (let at = 0; at < size;) {
-        const end = Math.min(at + CHUNK, size);
-        await hx(`/jobs/${id}/input?offset=${at}`, { method: 'PUT', body: await read(at, end), signal });
-        at = end;
-        job.show(20 * at / size, `도우미에 넘기는 중 ${(at / 1e6).toFixed(0)} / ${(size / 1e6).toFixed(0)}MB`);
-      }
-      // 2) Lada 처리 (20~80%)
-      let st;
-      for (;;) {
-        st = await (await hx(`/jobs/${id}`, { signal })).json();
-        if (st.state === 'failed') throw new Error(st.error || 'Lada 처리 실패');
-        if (st.state === 'done') break;
-        job.show(20 + 0.6 * st.progress, `모자이크 해제 중 ${st.progress}%`);
-        await sleep(2000);
-        if (signal.aborted) throw new DOMException('취소했어요', 'AbortError');
-      }
-      // 3) 결과를 임시 저장공간에 모은 뒤 같은 파일에 덮어씀 (80~100%)
-      const made = await withTemp('lada-' + f.id + '.mp4', async tmp => {
-        const w = tmp.writable.getWriter();
-        for (let at = 0; at < st.outSize;) {
-          const end = Math.min(at + CHUNK, st.outSize);
-          const r = await hx(`/jobs/${id}/output`, { headers: { Range: `bytes=${at}-${end - 1}` }, signal });
-          const data = new Uint8Array(await r.arrayBuffer());
-          if (data.length !== end - at) throw new Error('도우미에서 받은 길이가 맞지 않아요');
-          await w.write({ position: at, data });
-          at = end;
-          job.show(80 + 10 * at / st.outSize, `결과 받는 중 ${(at / 1e6).toFixed(0)} / ${(st.outSize / 1e6).toFixed(0)}MB`);
-        }
-        await w.close();
-        const blob = await tmp.file();
-        if (!(token && Date.now() < tokenExp)) await waitLogin(signal, onWait);
-        const m = await driveUpload({}, blob, n => job.show(90 + 10 * n / blob.size, `드라이브에 덮어쓰는 중 ${(n / 1e6).toFixed(0)} / ${(blob.size / 1e6).toFixed(0)}MB`), signal, f.id, upload);
-        if (!m || +m.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요.');
-        return m;
-      });
-      upload.url = null;
-      Object.assign(f, { size: made.size, mimeType: made.mimeType || f.mimeType });
-      setTags(f, tagsOf(f).filter(t => t !== TAG));
-    } catch (e) {
-      if (upload.url) fetch(upload.url, { method: 'DELETE' }).catch(() => {}); // 올리다 만 건 버림 → 원본 그대로
-      throw e;
-    } finally {
-      fetch(`${HELPER}/jobs/${id}`, { method: 'DELETE' }).catch(() => {});
+    job.hid = id;
+    const read = MergeUI.tools.driveRead(f, signal, onWaitOf(job));
+    for (let at = 0; at < size;) {
+      const stop = Math.min(at + CHUNK, size);
+      await hx(`/jobs/${id}/input?offset=${at}`, { method: 'PUT', body: await read(at, stop), signal });
+      at = stop;
+      job.show(20 * at / size, `도우미에 넘기는 중 ${(at / 1e6).toFixed(0)} / ${(size / 1e6).toFixed(0)}MB`);
     }
+  }
+  // 2) Lada 진행 지켜보기 (20~80%)
+  async function watch(job) {
+    const { signal } = job.ctrl;
+    try {
+      for (;;) {
+        if (signal.aborted) throw new DOMException('취소했어요', 'AbortError');
+        const st = await (await hx(`/jobs/${job.hid}`, { signal })).json();
+        if (st.state === 'failed') throw new Error(st.error || 'Lada 처리 실패');
+        if (st.state === 'done') { job.outSize = st.outSize; break; }
+        if (st.state === 'queued') job.show(20, `Lada 차례를 기다리는 중 (앞에 ${st.ahead}개)`);
+        else job.show(20 + 0.6 * st.progress, `모자이크 해제 중 ${st.progress}%`);
+        await sleep(2000);
+      }
+      job.show(80, '처리 끝 · 드라이브에 올릴 차례를 기다리는 중');
+      finishQ.push(job);
+      finish();
+    } catch (e) { end(job, e.name === 'AbortError' ? 'canceled' : 'failed', errText(e)); }
+  }
+  // 3) 결과 받기 + 같은 파일에 덮어쓰기 (80~100%), 하나씩
+  let finishing = false;
+  async function finish() {
+    if (finishing) return;
+    finishing = true;
+    try {
+      for (let job; (job = finishQ.shift());) {
+        job.uploading = true;
+        pump(); // 이 작업은 이제 도우미 자리를 곧 비우므로 다음 영상을 넘겨도 됨
+        const { f, ctrl: { signal } } = job, onWait = onWaitOf(job), { withTemp, driveUpload, waitLogin } = MergeUI.tools;
+        const upload = { url: null };
+        try {
+          const made = await withTemp('lada-' + f.id + '.mp4', async tmp => {
+            const w = tmp.writable.getWriter();
+            for (let at = 0; at < job.outSize;) {
+              const stop = Math.min(at + CHUNK, job.outSize);
+              const r = await hx(`/jobs/${job.hid}/output`, { headers: { Range: `bytes=${at}-${stop - 1}` }, signal });
+              const data = new Uint8Array(await r.arrayBuffer());
+              if (data.length !== stop - at) throw new Error('도우미에서 받은 길이가 맞지 않아요');
+              await w.write({ position: at, data });
+              at = stop;
+              job.show(80 + 10 * at / job.outSize, `결과 받는 중 ${(at / 1e6).toFixed(0)} / ${(job.outSize / 1e6).toFixed(0)}MB`);
+            }
+            await w.close();
+            const blob = await tmp.file();
+            if (!(token && Date.now() < tokenExp)) await waitLogin(signal, onWait);
+            const m = await driveUpload({}, blob, n => job.show(90 + 10 * n / blob.size, `드라이브에 덮어쓰는 중 ${(n / 1e6).toFixed(0)} / ${(blob.size / 1e6).toFixed(0)}MB`), signal, f.id, upload);
+            if (!m || +m.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요.');
+            return m;
+          });
+          Object.assign(f, { size: made.size, mimeType: made.mimeType || f.mimeType });
+          setTags(f, tagsOf(f).filter(t => t !== TAG));
+          end(job, 'done', '끝났어요. "모자이크" 태그를 뗐어요.');
+        } catch (e) {
+          if (upload.url) fetch(upload.url, { method: 'DELETE' }).catch(() => {}); // 올리다 만 건 버림 → 원본 그대로
+          end(job, e.name === 'AbortError' ? 'canceled' : 'failed', errText(e));
+        }
+      }
+    } finally { finishing = false; }
   }
   addEventListener('beforeunload', e => { if (unfinished().length) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -209,7 +243,7 @@ const DecensorUI = (() => {
         helperOk === false ? el('button', { className: 'primary', textContent: '도우미 켜기', disabled: launching, onclick: launch }) : null,
         refreshButton()),
       el('p', { className: 'hint', textContent: editing()
-        ? '카드를 누르면 대기열에 넣고, 다시 누르면 빼요. 작업은 하나씩 차례로 돌고, 도는 동안에도 계속 넣을 수 있어요. 끝난 영상은 같은 드라이브 파일에 덮어쓰고(드라이브에 원본이 이전 버전으로 30일 남음) "모자이크" 태그를 떼요. 얼굴 모자이크는 건드리지 않아요. 처리하는 동안 이 탭과 PC 의 도우미 창을 켜 두세요.'
+        ? '카드를 누르면 대기열에 넣고, 다시 누르면 빼요. 도는 동안에도 계속 넣을 수 있어요. 대기 중인 영상은 PC 도우미에 미리 넘겨 두고(최대 8개·12GB) Lada 가 하나씩 처리해서, 로그인이 끊겨도 넘겨 둔 것은 계속 처리하고 올리기만 다시 로그인할 때까지 기다려요. 끝난 영상은 같은 드라이브 파일에 덮어쓰고(드라이브에 원본이 이전 버전으로 30일 남음) "모자이크" 태그를 떼요. 얼굴 모자이크는 건드리지 않아요. 처리하는 동안 이 탭과 PC 의 도우미 창을 켜 두세요.'
         : '수정 ON 에서 카드를 눌러 모자이크 해제 대기열에 넣을 수 있어요.' }),
       jobs.length ? el('div', { className: 'merge-jobs' }, ...jobs.map(j => j.el)) : null);
     const grid = el('div', { className: 'cat-grid' }, ...list.map(f => videoCard(f, counts)));

@@ -1,5 +1,6 @@
 // 모자이크 해제 도우미: 이 PC 의 Lada(lada-cli)를 갤러리 사이트가 쓸 수 있게 127.0.0.1 에서만 여는 작은 서버.
 // 사이트가 드라이브에서 받은 영상을 조각으로 넘기면 → Lada 로 처리 → 결과를 조각으로 돌려줌. 드라이브 로그인은 사이트가 함(여긴 비밀키 없음).
+// 여러 영상을 미리 받아 둘 수 있고, Lada 는 받은 순서대로 하나씩 돌림 (사이트 로그인이 끊겨도 받아 둔 것은 계속 처리).
 // 실행: node tools/lada-helper.cjs   (또는 tools/lada-helper.bat)
 // 환경 변수: LADA_CLI(lada-cli.exe 경로), LADA_WORK(임시 폴더), LADA_PORT
 'use strict';
@@ -18,7 +19,7 @@ const ORIGINS = new Set(['https://srsplitter.github.io', 'http://localhost:8080'
 const ARGS = ['--detect-face-mosaics', '--encoder', 'h264_nvenc', '--encoder-options', '-preset p5 -tune hq -rc vbr -cq 20 -b:v 0'];
 
 fs.mkdirSync(WORK, { recursive: true });
-const jobs = new Map(); // id → { dir, input, output, size, received, state, progress, log, proc }
+const jobs = new Map(); // id → { dir, input, output, size, received, state: receiving|queued|running|done|failed, progress, log, proc } (받은 순서대로)
 
 // 지난번에 남은 작업 폴더 정리 (도우미를 다시 켜면 이전 작업은 이어 갈 수 없음)
 for (const name of fs.readdirSync(WORK)) if (/^[0-9a-f]{16}$/.test(name)) fs.rmSync(path.join(WORK, name), { recursive: true, force: true });
@@ -29,7 +30,10 @@ function send(res, status, body, headers = {}) {
   res.end(data);
 }
 function view(job) {
-  return { state: job.state, progress: job.progress, received: job.received, size: job.size,
+  const list = [...jobs.values()];
+  // 이 작업 앞에 Lada 를 기다리거나 도는 작업 수
+  const ahead = job.state === 'queued' ? list.filter(j => j.state === 'running' || (j.state === 'queued' && list.indexOf(j) < list.indexOf(job))).length : 0;
+  return { state: job.state, progress: job.progress, ahead, received: job.received, size: job.size,
     outSize: job.state === 'done' ? fs.statSync(job.output).size : 0, error: job.error || '' };
 }
 function removeJob(id) {
@@ -39,6 +43,13 @@ function removeJob(id) {
   const rm = () => fs.rm(job.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }, () => {});
   // 윈도우에선 Lada 가 쥐고 있는 파일을 못 지우므로, 멈추게 한 뒤 끝나면 지움
   if (job.proc) { job.proc.once('close', rm); spawn('taskkill', ['/pid', String(job.proc.pid), '/T', '/F'], { windowsHide: true }); } else rm(); // 딸린 ffmpeg 까지 같이 끔
+}
+// Lada 는 한 번에 하나: 도는 게 없으면 가장 먼저 받은 대기 작업을 시작
+function schedule() {
+  const list = [...jobs.values()];
+  if (list.some(j => j.state === 'running')) return;
+  const next = list.find(j => j.state === 'queued');
+  if (next) run(next);
 }
 function run(job) {
   job.state = 'running';
@@ -55,12 +66,13 @@ function run(job) {
   proc.stderr.on('data', onData);
   proc.on('close', code => {
     job.proc = null;
-    if (!jobs.has(job.id)) return;
+    if (!jobs.has(job.id)) return schedule(); // 취소된 작업 → 다음 차례
     fs.rm(job.input, { force: true }, () => {});
     if (code === 0 && fs.existsSync(job.output) && fs.statSync(job.output).size > 0) { job.state = 'done'; job.progress = 100; }
     else { job.state = 'failed'; job.error = `Lada 가 끝나지 못했어요 (코드 ${code})`; }
+    schedule();
   });
-  proc.on('error', e => { job.state = 'failed'; job.error = 'Lada 를 실행하지 못했어요: ' + e.message; });
+  proc.on('error', e => { job.state = 'failed'; job.error = 'Lada 를 실행하지 못했어요: ' + e.message; job.proc = null; schedule(); });
 }
 
 const server = http.createServer((req, res) => {
@@ -112,7 +124,7 @@ const server = http.createServer((req, res) => {
       if (job.received + buf.length > job.size) return send(res, 400, 'too large');
       fs.appendFileSync(job.input, buf);
       job.received += buf.length;
-      if (job.received === job.size) run(job);
+      if (job.received === job.size) { job.state = 'queued'; schedule(); } // 다 받으면 Lada 차례에 넣음
       send(res, 200, view(job));
     });
     return;
