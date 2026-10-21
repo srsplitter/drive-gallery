@@ -17,9 +17,9 @@ const Branding = (() => {
     const custom = typeof value === 'string' && value.startsWith('data:image/png;base64,') && value.length <= 1000000;
     const image = document.createElement('img');
     image.alt = '';
-    image.src = custom ? value : 'icons/gallery-192.png';
+    image.src = custom ? value : 'icons/gallery-192.png?v=20261021';
     icon.replaceChildren(image);
-    favicon.href = custom && !safari ? value : 'site-icon-20261017.png';
+    favicon.href = custom && !safari ? value : 'site-icon-20261021.png';
     favicon.type = 'image/png';
     if (custom && !safari) favicon.removeAttribute('sizes');
     else favicon.setAttribute('sizes', '180x180');
