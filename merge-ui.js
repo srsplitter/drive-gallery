@@ -152,15 +152,18 @@ const MergeUI = (() => {
 
   // ---- 드라이브에서 조금씩 읽기 (로그인이 만료되면 다시 로그인할 때까지 기다렸다 이어서) ----
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  async function waitLogin(signal) {
-    setStatus('로그인 시간이 끝나 합치기를 잠시 멈췄어요. 위쪽 🔑 다시 로그인을 누르면 이어서 해요.', true);
+  // onWait(true/false): 기다리기 시작·끝 (작업 목록에 "로그인 기다리는 중" 표시용)
+  async function waitLogin(signal, onWait) {
+    setStatus('로그인 시간이 끝나 드라이브 읽기·올리기를 잠시 멈췄어요. 위쪽 🔑 다시 로그인을 누르면 이어서 해요.', true);
+    if (onWait) onWait(true);
     while (!(token && Date.now() < tokenExp)) {
       if (signal.aborted) throw new DOMException('취소했어요', 'AbortError');
       await sleep(1000);
     }
     setStatus('');
+    if (onWait) onWait(false);
   }
-  const driveRead = (f, signal) => async (start, end) => {
+  const driveRead = (f, signal, onWait) => async (start, end) => {
     for (let tries = 0; ; tries++) {
       try {
         const r = await api(`${DRIVE}/files/${f.id}?alt=media`, { headers: { Range: `bytes=${start}-${end - 1}` }, signal });
@@ -169,7 +172,7 @@ const MergeUI = (() => {
         return buf;
       } catch (e) {
         if (signal.aborted) throw e;
-        if (e instanceof AuthError) { await waitLogin(signal); continue; }
+        if (e instanceof AuthError) { await waitLogin(signal, onWait); continue; }
         if (tries < 3) { await sleep(1500 * (tries + 1)); continue; }
         throw e;
       }

@@ -110,11 +110,13 @@ const DecensorUI = (() => {
     const { f, ctrl: { signal } } = job;
     const { driveRead, withTemp, driveUpload, waitLogin } = MergeUI.tools;
     const size = +f.size;
+    // 로그인이 끝나면 드라이브 읽기·올리기만 멈추고 기다림 (Lada 처리는 PC 에서 계속). 다시 로그인하면 이어서
+    const onWait = on => { if (on) job.show(undefined, '로그인 시간이 끝나 기다리는 중 — 위쪽 🔑 다시 로그인을 누르면 이어서 해요'); };
     const { id } = await (await hx('/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size }), signal })).json();
     const upload = { url: null };
     try {
       // 1) 드라이브 → 도우미 (0~20%)
-      const read = driveRead(f, signal);
+      const read = driveRead(f, signal, onWait);
       for (let at = 0; at < size;) {
         const end = Math.min(at + CHUNK, size);
         await hx(`/jobs/${id}/input?offset=${at}`, { method: 'PUT', body: await read(at, end), signal });
@@ -145,7 +147,7 @@ const DecensorUI = (() => {
         }
         await w.close();
         const blob = await tmp.file();
-        if (!(token && Date.now() < tokenExp)) await waitLogin(signal);
+        if (!(token && Date.now() < tokenExp)) await waitLogin(signal, onWait);
         const m = await driveUpload({}, blob, n => job.show(90 + 10 * n / blob.size, `드라이브에 덮어쓰는 중 ${(n / 1e6).toFixed(0)} / ${(blob.size / 1e6).toFixed(0)}MB`), signal, f.id, upload);
         if (!m || +m.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요.');
         return m;
