@@ -299,6 +299,7 @@
   .merge-item-btns { gap: 4px; } .merge-item-btns button.small { margin-left: 0; }
   .card.merge-picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); } /* 목록에서 합칠 영상으로 고른 카드: 파란 테두리 */
   .merge-thumb { outline: 3px solid #ffc531; outline-offset: -3px; } /* 합치기 칸에 담긴 영상 썸네일: 노란 테두리 */
+  .card.mosaic-queued { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); } /* [모자이크] 탭: 대기열에 든 영상 */
   .merge-bar { height: 10px; border-radius: 6px; background: var(--bg); overflow: hidden; border: 1px solid var(--line); }
   .merge-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
   .hint.error { color: var(--danger); }
@@ -313,7 +314,7 @@
   #confirmDlg { width: min(420px, 100vw - 32px); }
   #confirmDlg p { margin: 0; line-height: 1.5; }
   /* 구역 이름(즐겨찾기·추천·동영상): 아래에도 구분선 — 위 구분선과 같은 선, 이름과 카드 사이 간격 */
-  #starVideos h2, #favoriteVideos h2, #regularVideos > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600;
+  #starVideos h2, #favoriteVideos h2, #regularVideos > h2.section-title, #mosaicView > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600;
     margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   /* 분류 칸 수정 ON: 즐겨찾기·수정·휴지통이 아래 3칸을 빈틈없이 나눠 씀, 휴지통은 빨강 */
   body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin {
@@ -522,8 +523,8 @@
 <script src="directory-thumbs.js?v=20261017-renum4"></script>
 <script src="branding.js?v=20261017-safari3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
-<script src="merge-ui.js?v=20261021-lada1"></script>
-<script src="decensor-ui.js?v=20261021-lada1"></script>
+<script src="merge-ui.js?v=20261021-lada2"></script>
+<script src="decensor-ui.js?v=20261021-lada2"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -1584,11 +1585,13 @@ function renderGrid() {
   if (randomRank) shown.sort((a, b) => (randomRank.get(a.id) ?? 1e9) - (randomRank.get(b.id) ?? 1e9));
   shown = window.GallerySeries.arrange(shown, gallery.series);
   if (currentView === 'title') shown = TitleEditor.filter(shown);
+  if (currentView === 'mosaic') shown = DecensorUI.filter(shown);
   $('#bulkTag').hidden = !!currentView;
-  $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title';
+  $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title' || currentView === 'mosaic';
   renderBulk();
   if (currentView === 'series') $('#grid').replaceChildren(SeriesUI.library());
   else if (currentView === 'title') { $('#grid').replaceChildren(TitleEditor.render(shown, counts)); ManualOrderUI.bind(); }
+  else if (currentView === 'mosaic') $('#grid').replaceChildren(DecensorUI.view(shown, counts));
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
@@ -1620,7 +1623,7 @@ function renderGrid() {
   else setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
   renderCatbar();
   if (viewer.open && viewerFile) SeriesUI.viewerNav(viewerFile);
-  if (SeriesUI.mode || currentView === 'series' || currentView === 'title') $('#editNote').hidden = true;
+  if (SeriesUI.mode || currentView === 'series' || currentView === 'title' || currentView === 'mosaic') $('#editNote').hidden = true;
   if (SeriesUI.mode) setStatus('시리즈 지정: 썸네일을 재생 순서대로 누른 뒤 저장하세요.');
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -1637,7 +1640,7 @@ const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'cate
 
 function directoryTabs() {
   const order = ['normal', 'genre', 'character', 'category'];
-  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀']].map(([kind, label]) => {
+  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀'], ['mosaic', '모자이크']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
@@ -1821,6 +1824,7 @@ function videoCard(f, counts = tagCounts()) {
   const delEl = !currentView && !SeriesUI.mode ? el('div', { className: 'card-foot edit-only' }, el('span', { className: 'card-del', textContent: '삭제' })) : null;
   const onCard = e => {
     if (SeriesUI.mode) return SeriesUI.choose(f);
+    if (currentView === 'mosaic' && document.body.classList.contains('editing')) return DecensorUI.toggle(f); // [모자이크] 탭: 대기열에 넣기·빼기
     if (MergeUI.active && document.body.classList.contains('editing')) return MergeUI.toggle(f);
     if (delEl && document.body.classList.contains('editing')) {
       const d = delEl.firstChild.getBoundingClientRect();
@@ -1843,6 +1847,7 @@ function videoCard(f, counts = tagCounts()) {
   if (isLoved(f)) { card.classList.add('loved'); thumb.append(heartSvg(true, 'love-badge')); }
   SeriesUI.decorate(card, f);
   MergeUI.decorate(card, f);
+  DecensorUI.decorate(card, f);
   return card;
 }
 

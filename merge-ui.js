@@ -11,8 +11,8 @@ const MergeUI = (() => {
   const jobs = [];
   let jobSeq = 0, fixing = null;
   const unfinished = () => jobs.filter(j => j.state === 'waiting' || j.state === 'running');
-  // 대기 중이거나 진행 중인 작업에 들어간 영상 (다른 작업에 또 담지 못하게)
-  const reserved = () => new Set(unfinished().flatMap(j => j.list.map(p => p.f.id)));
+  // 대기 중이거나 진행 중인 작업에 들어간 영상 (다른 작업에 또 담지 못하게) + 모자이크 해제 대기열에 든 영상
+  const reserved = () => new Set([...unfinished().flatMap(j => j.list.map(p => p.f.id)), ...DecensorUI.reservedIds()]);
   let picks = []; // [{ f }] 담은 순서
   let intro = null; // 합친 영상 맨 앞 1초 장면 { img: 캔버스·이미지, url: 미리보기, key: 고른 썸네일의 영상 ID | null(가위로 찍음) }
   let nameDraft = '', nameError = ''; // nameError: 이름 칸 아래 빨간 안내
@@ -25,7 +25,7 @@ const MergeUI = (() => {
   }
   function toggle(f) {
     const at = picks.findIndex(p => p.f.id === f.id);
-    if (at < 0 && reserved().has(f.id)) return setStatus(`"${f.name}" 은(는) 이미 다른 합치기 작업에 들어 있어요.`, true);
+    if (at < 0 && reserved().has(f.id)) return setStatus(`"${f.name}" 은(는) 이미 다른 합치기 작업이나 모자이크 해제 대기열에 들어 있어요.`, true);
     if (at >= 0) picks.splice(at, 1); else picks.push({ f });
     renderGrid();
   }
@@ -89,7 +89,7 @@ const MergeUI = (() => {
 
   function panel() {
     const box = $('#mergePanel');
-    box.hidden = !active && !jobs.length && !DecensorUI.running;
+    box.hidden = !active && !jobs.length;
     let top = $('#mergeTop');
     if (!top) {
       top = el('button', { id: 'mergeTop', title: '맨 위로', onclick: () => scrollTo({ top: 0, behavior: 'smooth' }) }, upArrow());
@@ -97,8 +97,7 @@ const MergeUI = (() => {
       document.body.append(top);
     }
     top.hidden = !active;
-    // 편집을 닫아도 진행 중인 합치기 작업·모자이크 해제는 보이게
-    if (!active) { if (jobs.length || DecensorUI.running) box.replaceChildren(...[jobs.length ? jobsView() : null, DecensorUI.running ? DecensorUI.section() : null].filter(Boolean)); return; }
+    if (!active) { if (jobs.length) box.replaceChildren(jobsView()); return; }
     const nameIn = el('input', { className: 'm-in', placeholder: '합친 영상 이름 (예: 겨울왕국 모음)', value: nameDraft,
       oninput: () => { nameDraft = nameIn.value; if (nameError) { nameError = ''; nameErr.remove(); } } });
     const nameErr = el('p', { className: 'hint error', textContent: nameError });
@@ -148,8 +147,7 @@ const MergeUI = (() => {
       el('p', { className: 'hint', textContent: '합친 영상은 첫 영상이 있는 드라이브 폴더에 올라가고, 다 올라간 걸 확인한 뒤 원본은 드라이브 휴지통으로 옮겨져요(30일 안에 복원 가능). 해상도는 첫 영상에 맞추고, 합치는 동안 이 탭을 열어 두세요.' }),
       isPC() ? null : el('p', { className: 'hint error', textContent: '영상 합치기는 PC 크롬·엣지에서만 돼요.' }),
       el('div', { className: 'row' }, go, el('button', { textContent: '닫기', onclick: toggleMode })),
-      jobs.length ? jobsView() : null,
-      DecensorUI.section()].filter(Boolean));
+      jobs.length ? jobsView() : null].filter(Boolean));
   }
 
   // ---- 드라이브에서 조금씩 읽기 (로그인이 만료되면 다시 로그인할 때까지 기다렸다 이어서) ----
