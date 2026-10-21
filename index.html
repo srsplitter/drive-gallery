@@ -31,10 +31,11 @@
   @media (min-width: 641px) {
     header { position: sticky; top: 0; z-index: 5; }
   }
-  header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; }
   #siteLogo { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; font-weight: 600; }
   #brandIcon { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; font-size: 25px; flex: none; }
   #brandIcon img { width: 100%; height: 100%; object-fit: contain; }
+  #appVersion { margin-left: 6px; font-size: 11px; font-weight: 400; color: #5a606b; } /* 사이트 버전 (배포할 때 올림) */
   #crumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; white-space: nowrap; color: var(--dim); }
   #crumbs a { color: var(--dim); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
   #crumbs a:last-child { color: var(--text); font-weight: 600; }
@@ -340,6 +341,7 @@
   .heart-ico path.on { fill: #ff4f9a; stroke: #ff4f9a; }
   .heart-btn:hover .heart-ico path.off { stroke: #ff4f9a; }
   button.small { padding: 3px 10px; font-size: 13px; margin-left: 8px; }
+  #crumbs button.small { padding-top: 6px; padding-bottom: 6px; } /* 숨긴 영상·복원 등: 헤더 [편집] 버튼과 같은 높이 */
   button.danger { background: #c62828; border-color: #c62828; color: #fff; }
   body.editing #vTitle { cursor: text; }
   body.editing #vTitle:hover { text-decoration: underline dotted; }
@@ -452,7 +454,7 @@
 </head>
 <body>
 <header>
-  <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon"><img src="icons/gallery-192.png" alt=""></span><span>갤러리</span></button></h1>
+  <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon"><img src="icons/gallery-192.png" alt=""></span><span>갤러리</span></button><span id="appVersion" title="사이트 버전">v1.0.0.1</span></h1>
   <button id="mergeBtn" class="edit-only" type="button" title="영상 합치기">편집</button>
   <input id="brandFile" type="file" accept="image/*" hidden>
   <div id="crumbs"></div>
