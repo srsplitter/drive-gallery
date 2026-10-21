@@ -31,11 +31,12 @@
   @media (min-width: 641px) {
     header { position: sticky; top: 0; z-index: 5; }
   }
-  header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; }
-  #siteLogo { display: inline-flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; font-weight: 600; }
-  #brandIcon { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; font-size: 25px; flex: none; }
+  header h1 { font-size: 17px; margin: 0; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: baseline; } /* 버전 글자를 "갤러리"와 밑줄 맞춤 */
+  #siteLogo { display: inline-flex; align-items: baseline; gap: 8px; padding: 0; border: 0; background: transparent; font-weight: 600; }
+  #brandIcon { align-self: center; display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; font-size: 25px; flex: none; }
   #brandIcon img { width: 100%; height: 100%; object-fit: contain; }
   #appVersion { margin-left: 6px; font-size: 11px; font-weight: 400; color: #5a606b; } /* 사이트 버전 (배포할 때 올림) */
+  @media (max-width: 640px) { #appVersion { margin-left: 4px; font-size: 10px; letter-spacing: -.2px; } }
   #crumbs { flex: 1; min-width: 0; display: flex; gap: 4px; align-items: center; overflow-x: auto; white-space: nowrap; color: var(--dim); }
   #crumbs a { color: var(--dim); cursor: pointer; padding: 2px 4px; border-radius: 6px; }
   #crumbs a:last-child { color: var(--text); font-weight: 600; }
@@ -341,7 +342,9 @@
   .heart-ico path.on { fill: #ff4f9a; stroke: #ff4f9a; }
   .heart-btn:hover .heart-ico path.off { stroke: #ff4f9a; }
   button.small { padding: 3px 10px; font-size: 13px; margin-left: 8px; }
-  #crumbs button.small { padding-top: 6px; padding-bottom: 6px; } /* 숨긴 영상·복원 등: 헤더 [편집] 버튼과 같은 높이 */
+  #crumbs button.small { padding: 8px 14px; font-size: inherit; } /* 숨긴 영상·복원 등: 헤더 [편집] 버튼과 같은 크기 */
+  @media (max-width: 640px) { #crumbs button.small { padding: 6px 10px; font-size: 13px; } } /* 폰: 헤더 버튼도 작아지므로 같이 */
+  .decensor .refresh-btn { align-self: stretch; display: inline-flex; align-items: center; padding: 0 9px; } /* 도우미 다시 확인: 옆 버튼 높이에 맞춘 새로고침 아이콘 */
   button.danger { background: #c62828; border-color: #c62828; color: #fff; }
   body.editing #vTitle { cursor: text; }
   body.editing #vTitle:hover { text-decoration: underline dotted; }
@@ -526,7 +529,7 @@
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
 <script src="merge-ui.js?v=20261021-lada2"></script>
-<script src="decensor-ui.js?v=20261021-lada3"></script>
+<script src="decensor-ui.js?v=20261021-lada4"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';

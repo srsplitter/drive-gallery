@@ -163,6 +163,16 @@ const DecensorUI = (() => {
   addEventListener('beforeunload', e => { if (unfinished().length) { e.preventDefault(); e.returnValue = ''; } });
 
   // ---- 화면 ----
+  // 도우미 다시 확인: 새로고침 아이콘 버튼 (오른쪽 아래 자동 정렬 버튼과 같은 그림)
+  function refreshButton() {
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('class', 'round-ico');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    for (const d of ['M20 11a8 8 0 1 0-2.3 5.7', 'M20 4v7h-7']) { const p = document.createElementNS(ns, 'path'); p.setAttribute('d', d); svg.append(p); }
+    const b = el('button', { className: 'refresh-btn', title: '도우미 다시 확인', onclick: checkHelper }, svg);
+    b.setAttribute('aria-label', '도우미 다시 확인');
+    return b;
+  }
   function jobView(job) {
     const bar = el('div', { className: 'merge-bar' }, el('i'));
     const label = el('div', { className: 'hint' });
@@ -195,7 +205,7 @@ const DecensorUI = (() => {
       el('div', { className: 'row' },
         el('button', { className: 'primary edit-only', textContent: `대기열에 모두 넣기 (${free.length})`, disabled: !free.length, onclick: () => addAll(free) }),
         helperOk === false ? el('button', { className: 'primary', textContent: '도우미 켜기', disabled: launching, onclick: launch }) : null,
-        el('button', { className: 'small', textContent: '도우미 다시 확인', onclick: checkHelper })),
+        refreshButton()),
       el('p', { className: 'hint', textContent: editing()
         ? '카드를 누르면 대기열에 넣고, 다시 누르면 빼요. 작업은 하나씩 차례로 돌고, 도는 동안에도 계속 넣을 수 있어요. 끝난 영상은 같은 드라이브 파일에 덮어쓰고(드라이브에 원본이 이전 버전으로 30일 남음) "모자이크" 태그를 떼요. 얼굴 모자이크는 건드리지 않아요. 처리하는 동안 이 탭과 PC 의 도우미 창을 켜 두세요.'
         : '수정 ON 에서 카드를 눌러 모자이크 해제 대기열에 넣을 수 있어요.' }),
