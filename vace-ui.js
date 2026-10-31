@@ -121,7 +121,7 @@ window.VaceUI = (() => {
       status.textContent = text; statusPanel.dataset.error = String(error);
     }
     async function request(path, options = {}) {
-      const response = await fetch(BASE + path, { ...options, signal: abort.signal,
+      const response = await fetch(BASE + path, { ...options, signal: options.signal || abort.signal,
         headers: { 'X-Vace-Client': 'drive-gallery', ...options.headers } });
       if (!response.ok) {
         let text = `PC 도우미 응답 오류 (${response.status})`;
@@ -133,19 +133,29 @@ window.VaceUI = (() => {
     const jsonPost = (path, data) => request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json());
     function fail(error) { if (error.name !== 'AbortError') message(error.message || String(error), true); }
     async function health() {
+      if (abort.signal.aborted) return false;
+      const healthAbort = new AbortController();
+      const cancel = () => healthAbort.abort();
+      abort.signal.addEventListener('abort', cancel, { once: true });
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; healthAbort.abort(); }, 12000);
+      message('PC 도우미를 확인하는 중…');
       try {
-        const value = await (await request('/health')).json();
+        const value = await (await request('/health', { signal: healthAbort.signal })).json();
         connection.replaceChildren();
         if (value.ready) message('이 PC의 VACE 도우미와 연결됐어요. 짧은 영상으로 결과를 확인하세요.');
         else message(value.error || 'PC 도우미는 연결됐지만 모델을 준비 중이에요. 잠시 뒤 다시 확인하세요.', true);
         connection.append(button('도우미 다시 확인', health));
         return value.ready;
       } catch (error) {
-        if (error.name === 'AbortError') return false;
-        message('PC 도우미에 연결하지 못했어요.', true);
+        if (abort.signal.aborted) return false;
+        message(timedOut ? '12초 안에 PC 도우미의 응답을 받지 못했어요.' : 'PC 도우미에 연결하지 못했어요.', true);
         connection.replaceChildren(help('이 PC에서 C:\\AI\\VACE-local-test\\Start-VACE.cmd를 실행한 뒤 다시 확인하세요.'),
-          help('브라우저가 로컬 네트워크 연결 허용을 물으면 이 도우미 연결을 허용하세요.'), button('도우미 다시 확인', health));
+          help('연결이 계속 안 되면 일반 Chrome 또는 Edge에서 이 사이트를 여세요. 로컬 네트워크 연결 허용을 물으면 이 도우미 연결을 허용하세요.'), button('도우미 다시 확인', health));
         return false;
+      } finally {
+        clearTimeout(timer);
+        abort.signal.removeEventListener('abort', cancel);
       }
     }
     function validBox() {
