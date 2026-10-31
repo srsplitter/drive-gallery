@@ -21,7 +21,7 @@ import urllib.request
 import uuid
 
 ORIGINS = {"https://srsplitter.github.io", "http://localhost:8080", "http://127.0.0.1:8080"}
-MAX_UPLOAD = 2 * 1024**3
+MAX_SAFE_INTEGER = 2**53 - 1
 MAX_CHUNK = 8 * 1024**2
 RESERVE = 5 * 1024**3
 MODEL_FILES = {
@@ -84,10 +84,21 @@ class App:
         self.health_cache = None
         self.health_checked = 0
 
+    def upload_capacity(self):
+        with self.lock:
+            reserved = sum(u["size"] - u["received"] for u in self.uploads.values()
+                           if u["received"] < u["size"])
+            free = shutil.disk_usage(self.jobs_root).free
+            return dict(max_upload_bytes=MAX_SAFE_INTEGER,
+                        available_upload_bytes=min(MAX_SAFE_INTEGER, max(0, free - reserved - RESERVE)),
+                        disk_free_bytes=free, reserved_upload_bytes=reserved,
+                        disk_reserve_bytes=RESERVE)
+
     def health(self):
         with self.lock:
             if self.health_cache is not None and time.monotonic() - self.health_checked < 3:
-                return dict(self.health_cache, busy=bool(self.active) or self.health_cache["comfy_busy"])
+                return dict(self.health_cache, busy=bool(self.active) or self.health_cache["comfy_busy"],
+                            **self.upload_capacity())
         manifest = []
         try:
             manifest = json.loads((self.root / "model-manifest.json").read_text(encoding="utf-8"))
@@ -128,16 +139,16 @@ class App:
             errors.append("ffmpeg and ffprobe must be installed and on PATH")
         result = dict(ready=not errors, busy=bool(self.active) or comfy_busy,
                       error="; ".join(errors) if errors else None, models=models,
-                      comfy=comfy, comfy_busy=comfy_busy, max_upload_bytes=MAX_UPLOAD,
+                      comfy=comfy, comfy_busy=comfy_busy,
                       chunk_bytes=MAX_CHUNK, fps=16, max_duration=5)
         with self.lock:
             self.health_cache, self.health_checked = result, time.monotonic()
-        return result
+        return dict(result, **self.upload_capacity())
 
     def new_upload(self, data):
         size = data.get("size")
-        if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= MAX_UPLOAD:
-            raise APIError(400, "size must be an integer between 1 byte and 2 GiB")
+        if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= MAX_SAFE_INTEGER:
+            raise APIError(400, f"size must be a positive JavaScript-safe integer (at most {MAX_SAFE_INTEGER})")
         name = data.get("name", "video")
         if not isinstance(name, str) or not 1 <= len(name) <= 255 or any(ord(c) < 32 for c in name):
             raise APIError(400, "Invalid display name")
@@ -145,8 +156,7 @@ class App:
             pending = [u for u in self.uploads.values() if u["received"] < u["size"]]
             if len(pending) >= 8:
                 raise APIError(429, "Eight uploads are already unfinished; restart helper to reset IDs")
-            reserved = sum(u["size"] - u["received"] for u in pending)
-            if shutil.disk_usage(self.jobs_root).free < reserved + size + RESERVE:
+            if size > self.upload_capacity()["available_upload_bytes"]:
                 raise APIError(507, "Insufficient disk space including the 5 GiB reserve")
             uid = uuid.uuid4().hex
             folder = self.jobs_root / ("upload-" + uid)

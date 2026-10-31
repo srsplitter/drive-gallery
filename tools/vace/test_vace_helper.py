@@ -5,9 +5,9 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from vace_helper import APIError, App, Handler, ThreadingHTTPServer, MAX_CHUNK, range_bounds
+from vace_helper import APIError, App, Handler, ThreadingHTTPServer, MAX_CHUNK, MAX_SAFE_INTEGER, RESERVE, range_bounds
 
 
 class HelperTests(unittest.TestCase):
@@ -81,8 +81,64 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(stored.read_bytes(), b"abcdef")
         self.assertEqual(self.request("PUT", endpoint + "?offset=6", b"g")[0], 409)
 
-    def test_oversize_and_disk_reserve_reject_before_writing(self):
-        self.assertEqual(self.request("POST", "/uploads", {"size": 2 * 1024**3 + 1})[0], 400)
+    def test_invalid_upload_sizes(self):
+        for size in (0, -1, True, False, 1.0, "123", None, MAX_SAFE_INTEGER + 1):
+            with self.subTest(size=size):
+                self.assertEqual(self.request("POST", "/uploads", {"size": size})[0], 400)
+        self.assertEqual(self.app.uploads, {})
+
+    def test_large_metadata_and_remaining_upload_reservations(self):
+        gib = 1024**3
+        with patch("vace_helper.shutil.disk_usage") as disk:
+            disk.return_value.free = RESERVE + 5 * gib
+            status, _, data = self.request("POST", "/uploads", {"size": 3 * gib})
+            self.assertEqual(status, 201)
+            upload = self.app.uploads[data["id"]]
+            self.assertEqual(upload["path"].stat().st_size, 0)
+            self.assertEqual(self.app.upload_capacity()["available_upload_bytes"], 2 * gib)
+            self.assertEqual(self.request("POST", "/uploads", {"size": 2 * gib + 1})[0], 507)
+            self.assertEqual(self.request("PUT", f"/uploads/{data['id']}?offset=0", b"abcd")[0], 200)
+            disk.return_value.free -= 4
+            capacity = self.app.upload_capacity()
+            self.assertEqual(capacity["reserved_upload_bytes"], 3 * gib - 4)
+            self.assertEqual(capacity["available_upload_bytes"], 2 * gib)
+            self.assertEqual(self.request("POST", "/uploads", {"size": 2 * gib})[0], 201)
+            self.assertEqual(self.request("POST", "/uploads", {"size": 1})[0], 507)
+            self.assertEqual(upload["path"].stat().st_size, 4)
+
+    def test_offset_above_two_gib_is_not_truncated(self):
+        offset = 2 * 1024**3 + 123
+        with patch("vace_helper.shutil.disk_usage") as disk:
+            disk.return_value.free = RESERVE + offset + 10
+            _, _, data = self.request("POST", "/uploads", {"size": offset + 4})
+            upload = self.app.uploads[data["id"]]
+            upload["received"] = offset
+            # Simulate already-transferred bytes; never allocate a multi-gigabyte file.
+            fake_path = MagicMock()
+            upload["path"] = fake_path
+            status, _, result = self.request("PUT", f"/uploads/{data['id']}?offset={offset}", b"abc")
+            self.assertEqual(status, 200)
+            self.assertEqual(result["received"], offset + 3)
+            output = fake_path.open.return_value.__enter__.return_value
+            output.seek.assert_called_once_with(offset)
+            output.write.assert_called_once_with(b"abc")
+
+    def test_health_capacity_is_live_even_when_engine_status_is_cached(self):
+        with patch("vace_helper.urllib.request.urlopen", side_effect=OSError("test: no engine")), \
+             patch("vace_helper.shutil.disk_usage") as disk:
+            disk.return_value.free = RESERVE + 100
+            first = self.app.health()
+            self.assertEqual(first["max_upload_bytes"], MAX_SAFE_INTEGER)
+            self.assertEqual(first["available_upload_bytes"], 100)
+            self.assertEqual(first["disk_reserve_bytes"], RESERVE)
+            self.app.new_upload({"size": 40})
+            second = self.app.health()
+            self.assertEqual(second["available_upload_bytes"], 60)
+            self.assertEqual(second["reserved_upload_bytes"], 40)
+            disk.return_value.free = RESERVE + 30
+            self.assertEqual(self.app.health()["available_upload_bytes"], 0)
+
+    def test_chunk_limit_and_disk_reserve_reject_before_writing(self):
         with patch("vace_helper.shutil.disk_usage") as disk:
             disk.return_value.free = 10
             self.assertEqual(self.request("POST", "/uploads", {"size": 1})[0], 507)
@@ -90,6 +146,12 @@ class HelperTests(unittest.TestCase):
         status, _, _ = self.request("PUT", f"/uploads/{data['id']}?offset=0", b"", {"Content-Length": str(MAX_CHUNK + 1)})
         self.assertEqual(status, 413)
         self.assertEqual(self.app.uploads[data["id"]]["path"].stat().st_size, 0)
+        with patch("vace_helper.shutil.disk_usage") as disk:
+            disk.return_value.free = RESERVE + 2
+            self.assertEqual(self.request("PUT", f"/uploads/{data['id']}?offset=0", b"abc")[0], 507)
+            self.assertEqual(self.app.uploads[data["id"]]["path"].stat().st_size, 0)
+            disk.return_value.free = RESERVE + 3
+            self.assertEqual(self.request("PUT", f"/uploads/{data['id']}?offset=0", b"abc")[0], 200)
 
     def test_job_validation_and_single_worker(self):
         uid = self.upload()

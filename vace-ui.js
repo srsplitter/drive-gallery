@@ -3,7 +3,7 @@
 window.VaceUI = (() => {
   'use strict';
   const BASE = 'http://127.0.0.1:7862';
-  const CHUNK = 8 * 1024 * 1024, MAX_BYTES = 2 * 1024 ** 3;
+  const CHUNK = 8 * 1024 * 1024;
   const ACTIVE_KEY = 'vace-test-job';
   let current = null;
   const make = (tag, props = {}, ...children) => {
@@ -15,13 +15,16 @@ window.VaceUI = (() => {
   const label = (text, input) => make('label', {}, make('span', { textContent: text }), input);
   const help = text => make('p', { className: 'hint', textContent: text });
   const clamp = n => Math.max(0, Math.min(1, n));
+  const validSize = size => Number.isSafeInteger(size) && size > 0;
+  const formatSize = size => size >= 1e9 ? `${(size / 1e9).toFixed(2)}GB` : `${(size / 1e6).toFixed(1)}MB`;
   const hasSession = () => typeof token !== 'undefined' && token && Date.now() < tokenExp && !document.getElementById('authBtn')?.dataset.expired;
   function galleryChoices(query = '') {
     // Logout retains items in the host app; never show those without a loaded session.
     if (!hasSession() || !document.getElementById('login')?.hidden || !document.getElementById('grid')?.children.length) return [];
     const includeHidden = typeof showHidden !== 'undefined' && showHidden && document.body.classList.contains('editing');
     const needle = query.trim().toLocaleLowerCase();
-    return items.filter(f => (!isHidden(f) || includeHidden) && String(f.name || '').toLocaleLowerCase().includes(needle));
+    return items.filter(f => (!isHidden(f) || includeHidden) &&
+      (String(f.name || '').toLocaleLowerCase().includes(needle) || tagsOf(f).some(tag => tag.toLocaleLowerCase().includes(needle))));
   }
 
   const style = make('style', { textContent: `
@@ -45,8 +48,14 @@ window.VaceUI = (() => {
     .vace-content progress { width:100%; accent-color:var(--accent); }
     .vace-content button:focus-visible,.vace-content a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     .vace-video-list { display:grid; gap:6px; margin:10px 0; max-height:320px; overflow-y:auto; }
-    .vace-video-list button { display:grid; gap:4px; width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; padding:10px 12px; }
+    .vace-video-list button { display:grid; grid-template-columns:112px minmax(0,1fr); gap:12px; align-items:center; width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; padding:10px 12px; }
     .vace-video-list small { color:var(--dim); font-size:12px; }
+    .vace-video-thumb { display:grid; place-items:center; width:112px; aspect-ratio:16/9; overflow:hidden; border-radius:6px; background:var(--bg); color:var(--dim); }
+    .vace-video-thumb img { display:block; width:100%; height:100%; object-fit:cover; }
+    .vace-video-info { display:grid; gap:5px; min-width:0; }
+    .vace-video-tags { display:flex; flex-wrap:wrap; gap:4px; }
+    .vace-video-tag { padding:2px 6px; border:1px solid var(--line); border-radius:6px; font-size:11px; color:var(--dim); }
+    .vace-video-tag.match { color:var(--text); border-color:var(--accent); }
     @media(max-width:520px) { .vace-box-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } .vace-content { padding:12px; } }
   ` });
   document.head.append(style);
@@ -61,7 +70,8 @@ window.VaceUI = (() => {
   function open(file = null) {
     if (current) { current.dialog.focus(); return; }
     const abort = new AbortController(), urls = new Set();
-    const state = { upload: null, file: null, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0, page: 0 };
+    const state = { upload: null, file: null, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0, page: 0, choiceVersion: 0, availableBytes: null };
+    const thumbnails = new Set();
     const returnFocus = document.activeElement;
     const status = make('p', { role: 'status', ariaLive: 'polite', textContent: 'PC 도우미를 확인하는 중…' });
     const statusPanel = make('div', { className: 'vace-status' }, status);
@@ -69,7 +79,7 @@ window.VaceUI = (() => {
     const progress = make('progress', { hidden: true, max: 100, value: 0 });
     const sourceName = help('');
     const uploadButton = button('이 영상으로 테스트 준비', upload, { disabled: true });
-    const search = make('input', { type: 'search', placeholder: '영상 제목 검색', ariaLabel: '갤러리 영상 제목 검색' });
+    const search = make('input', { type: 'search', placeholder: '제목 또는 태그 검색', ariaLabel: '갤러리 영상 제목 또는 태그 검색' });
     const choices = make('div', { className: 'vace-video-list' });
     const choiceNote = help('');
     const previous = button('이전', () => { state.page--; renderChoices(); });
@@ -86,7 +96,7 @@ window.VaceUI = (() => {
     const loginButton = button('Drive 다시 로그인', loginAgain, { hidden: true });
     const sourceSection = make('section', {}, make('h3', { textContent: '1. 갤러리 영상 선택' }),
       picker, selection, loginButton,
-      help('사이트에 있는 영상을 선택하면 이 PC로 가져와 테스트합니다. 최대 2GB이며 결과는 별도로 내려받습니다.'), uploadButton, progress);
+      help('테스트 전에 전체 영상을 이 PC로 가져옵니다. 파일 크기만큼의 디스크 공간과 처리용 추가 여유 공간이 필요하며, 도우미가 남은 용량을 확인합니다. 결과는 별도로 내려받습니다.'), uploadButton, progress);
     search.oninput = () => { state.page = 0; renderChoices(); };
     const start = make('input', { type: 'number', min: 0, step: 0.1, value: '0' });
     const duration = make('input', { type: 'number', min: 1, max: 5, step: 0.5, value: '3' });
@@ -135,6 +145,7 @@ window.VaceUI = (() => {
     current = { dialog };
     dialog.addEventListener('close', () => {
       abort.abort(); clearTimeout(state.polling);
+      clearThumbnails();
       for (const video of dialog.querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); }
       for (const url of urls) URL.revokeObjectURL(url);
       state.image?.close?.(); dialog.remove(); current = null;
@@ -168,8 +179,9 @@ window.VaceUI = (() => {
       message('PC 도우미를 확인하는 중…');
       try {
         const value = await (await request('/health', { signal: healthAbort.signal })).json();
+        state.availableBytes = Number.isSafeInteger(value.available_upload_bytes) ? value.available_upload_bytes : null;
         connection.replaceChildren();
-        if (value.ready) message('이 PC의 VACE 도우미와 연결됐어요. 짧은 영상으로 결과를 확인하세요.');
+        if (value.ready) message('이 PC의 VACE 도우미와 연결됐어요.' + (state.availableBytes === null ? ' 짧은 영상으로 결과를 확인하세요.' : ` 현재 가져올 수 있는 영상 크기: ${formatSize(state.availableBytes)}.`));
         else message(value.error || 'PC 도우미는 연결됐지만 모델을 준비 중이에요. 잠시 뒤 다시 확인하세요.', true);
         connection.append(button('도우미 다시 확인', health));
         return value.ready;
@@ -199,24 +211,63 @@ window.VaceUI = (() => {
       if (!value && !picker.hidden) renderChoices();
       updateRun();
     }
+    function clearThumbnails() {
+      state.choiceVersion++;
+      for (const img of thumbnails) { img.onerror = null; img.removeAttribute('src'); }
+      thumbnails.clear();
+    }
+    function thumbnail(f) {
+      const version = state.choiceVersion;
+      const box = make('span', { className: 'vace-video-thumb', textContent: '🎞️' });
+      const img = make('img', { alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
+      thumbnails.add(img);
+      const custom = gallery.videos[f.id];
+      const fallback = f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s480') : '';
+      const active = () => box.isConnected && !abort.signal.aborted && version === state.choiceVersion && hasSession() && !picker.hidden &&
+        (!isHidden(f) || (showHidden && document.body.classList.contains('editing')));
+      let usingFallback = false;
+      const show = src => {
+        if (!active() || !src) return;
+        box.replaceChildren(img); img.src = src;
+      };
+      const useFallback = () => {
+        if (!active()) return;
+        if (fallback && !usingFallback) { usingFallback = true; show(fallback); }
+        else box.replaceChildren(make('span', { textContent: '🎞️' }));
+      };
+      img.onerror = useFallback;
+      queueMicrotask(() => {
+        if (!active()) return;
+        if (custom?.thumb) show(custom.thumb);
+        else if (custom?.file) {
+          // thumbUrl owns its shared cache/blob URLs; only discard this row's late result.
+          thumbUrl(custom.file).then(src => src ? show(src) : useFallback(), useFallback);
+        } else useFallback();
+      });
+      return box;
+    }
     function renderChoices() {
       if (state.busy) return;
       const list = galleryChoices(search.value);
       const pages = Math.max(1, Math.ceil(list.length / 30));
       state.page = Math.max(0, Math.min(state.page, pages - 1));
-      choices.replaceChildren();
+      clearThumbnails(); choices.replaceChildren();
       if (!hasSession()) {
         choiceNote.textContent = '갤러리에 로그인하면 사이트의 영상 목록에서 바로 선택할 수 있어요. 이 창을 닫고 구글로 로그인하세요.';
       } else if (!list.length) {
-        choiceNote.textContent = search.value.trim() ? '제목이 일치하는 영상이 없어요.' : '선택할 영상이 없어요. 갤러리 목록이 로딩 중이면 잠시 뒤 목록을 다시 확인하세요.';
+        choiceNote.textContent = search.value.trim() ? '제목이나 태그가 일치하는 영상이 없어요.' : '선택할 영상이 없어요. 갤러리 목록이 로딩 중이면 잠시 뒤 목록을 다시 확인하세요.';
       } else {
         choiceNote.textContent = `${list.length.toLocaleString()}개 영상 · 제목을 눌러 선택하세요.`;
         for (const f of list.slice(state.page * 30, (state.page + 1) * 30)) {
           const size = Number(f.size), seconds = Number(f.videoMediaMetadata?.durationMillis) / 1000;
           const details = [Number.isFinite(seconds) && seconds > 0 ? `${Math.floor(seconds / 60)}분 ${Math.floor(seconds % 60)}초` : '',
-            size > 0 ? `${(size / 1024 ** 2).toFixed(0)}MB` : '크기 정보 없음', size > MAX_BYTES ? '2GB 초과' : ''].filter(Boolean).join(' · ');
-          const option = button('', () => choose(f), { disabled: !(size > 0 && size <= MAX_BYTES) });
-          option.append(make('span', { textContent: f.name }), make('small', { textContent: details }));
+            validSize(size) ? formatSize(size) : '크기 정보 없음'].filter(Boolean).join(' · ');
+          const needle = search.value.trim().toLocaleLowerCase();
+          const tags = make('span', { className: 'vace-video-tags' }, tagsOf(f).map(tag => make('span', {
+            className: 'vace-video-tag' + (needle && tag.toLocaleLowerCase().includes(needle) ? ' match' : ''), textContent: tag,
+          })));
+          const option = button('', () => choose(f), { disabled: !validSize(size) });
+          option.append(thumbnail(f), make('span', { className: 'vace-video-info' }, make('span', { textContent: f.name }), make('small', { textContent: details }), tags));
           choices.append(option);
         }
       }
@@ -228,7 +279,7 @@ window.VaceUI = (() => {
       if (state.busy) return;
       if (!galleryChoices().some(item => item.id === f.id)) { renderChoices(); return message('로그인 상태와 갤러리 목록을 다시 확인하세요.', true); }
       const size = Number(f.size);
-      if (!(size > 0 && size <= MAX_BYTES)) return message('2GB 이하이며 크기 정보가 있는 영상을 선택하세요.', true);
+      if (!validSize(size)) return message('파일 크기 정보를 확인할 수 있는 영상을 선택하세요.', true);
       state.file = f; state.upload = null; state.box = null; state.frameRequest++;
       state.image?.close?.(); state.image = null;
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
@@ -239,6 +290,7 @@ window.VaceUI = (() => {
       coords.forEach(c => { c.input.value = ''; }); start.value = '0'; duration.value = '3';
       sourceName.textContent = `선택한 영상: ${f.name}`;
       selection.hidden = false; picker.hidden = true; loginButton.hidden = true;
+      clearThumbnails();
       message('영상을 선택했어요. 이 영상으로 테스트 준비를 눌러 구간과 얼굴 영역을 지정하세요.');
       updateRun(); uploadButton.focus();
     }
@@ -263,9 +315,13 @@ window.VaceUI = (() => {
       if (!source || state.busy) return message('갤러리에서 테스트할 영상을 선택하세요.', true);
       if (!hasSession()) { loginButton.hidden = false; return message('Drive 로그인이 만료됐어요. 이 창에서 다시 로그인하세요.', true); }
       const size = Number(source.size);
-      if (!size || size > MAX_BYTES) return message('0바이트보다 크고 2GB 이하인 영상으로 테스트하세요.', true);
+      if (!validSize(size)) return message('영상의 파일 크기 정보가 올바르지 않아요. 목록을 다시 확인하세요.', true);
       busy(true);
       if (!await health()) { busy(false); return; }
+      if (state.availableBytes !== null && size > state.availableBytes) {
+        busy(false);
+        return message(`PC의 여유 공간이 부족해요. 영상 크기 ${formatSize(size)}, 현재 가져올 수 있는 크기 ${formatSize(state.availableBytes)}입니다.`, true);
+      }
       progress.hidden = false; progress.value = 0;
       settings.hidden = generation.hidden = result.hidden = true;
       state.upload = null; state.box = null; state.frameRequest++;
@@ -279,7 +335,7 @@ window.VaceUI = (() => {
           const end = Math.min(offset + CHUNK, size);
           await request(`/uploads/${encodeURIComponent(upload.id)}?offset=${offset}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: await read(offset, end) });
           offset = end; progress.value = 100 * offset / size;
-          message(`PC에 영상 준비 중 · ${(offset / 1024 ** 2).toFixed(0)} / ${(size / 1024 ** 2).toFixed(0)}MB`);
+          message(`전체 영상을 PC로 가져오는 중 · ${formatSize(offset)} / ${formatSize(size)}`);
         }
         state.upload = await (await request(`/uploads/${encodeURIComponent(upload.id)}`)).json();
         sourceName.textContent = `${source.name} · ${Number(state.upload.duration).toFixed(1)}초`;
