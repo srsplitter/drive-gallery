@@ -156,7 +156,7 @@ const MergeUI = (() => {
   async function waitLogin(signal, onWait) {
     setStatus('로그인 시간이 끝나 드라이브 읽기·올리기를 잠시 멈췄어요. 위쪽 🔑 다시 로그인을 누르면 이어서 해요.', true);
     if (onWait) onWait(true);
-    while (!(token && Date.now() < tokenExp)) {
+    while (!(token && Date.now() < tokenExp && !$('#authBtn').dataset.expired)) {
       if (signal.aborted) throw new DOMException('취소했어요', 'AbortError');
       await sleep(1000);
     }

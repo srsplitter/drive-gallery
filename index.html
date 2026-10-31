@@ -528,7 +528,7 @@
 <script src="directory-thumbs.js?v=20261017-renum4"></script>
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
-<script src="merge-ui.js?v=20261021-lada5"></script>
+<script src="merge-ui.js?v=20261101-authwait1"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
@@ -2083,7 +2083,7 @@ function openViewer(f) {
       canCapture ? captureBtn : null,
       canFullscreen || iframe.tagName === 'VIDEO' ? el('button', { textContent: '전체화면', onclick: () => videoFullscreen(iframe) }) : null,
       el('a', { className: 'btn', href: `https://drive.google.com/file/d/${f.id}/view`, target: '_blank', rel: 'noopener', textContent: '드라이브에서 열기' }),
-      el('button', { className: 'edit-only', textContent: '가상 얼굴 테스트', onclick: () => window.VaceUI.open(f) }),
+      el('button', { textContent: '가상 얼굴 테스트', onclick: () => window.VaceUI.open(f) }),
       custom ? el('button', { className: 'edit-only', textContent: '기본 썸네일로 되돌리기', onclick: () => resetThumb(f) }) : null),
     tagBox(f),
     cands,
@@ -3303,6 +3303,6 @@ $('#clientIdSave').onclick = () => {
   if (token) start(); else $('#login').hidden = false;
 })();
 </script>
-<script src="vace-ui.js?v=20261101-test2"></script>
+<script src="vace-ui.js?v=20261101-gallery1"></script>
 </body>
 </html>

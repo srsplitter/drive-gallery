@@ -1,4 +1,4 @@
-// Local VACE test: explicit file selection, static edit box, preview/download only.
+// Local VACE test: gallery video selection, static edit box, preview/download only.
 // Drive OAuth stays in the gallery; the helper receives video bytes, never tokens.
 window.VaceUI = (() => {
   'use strict';
@@ -15,6 +15,14 @@ window.VaceUI = (() => {
   const label = (text, input) => make('label', {}, make('span', { textContent: text }), input);
   const help = text => make('p', { className: 'hint', textContent: text });
   const clamp = n => Math.max(0, Math.min(1, n));
+  const hasSession = () => typeof token !== 'undefined' && token && Date.now() < tokenExp && !document.getElementById('authBtn')?.dataset.expired;
+  function galleryChoices(query = '') {
+    // Logout retains items in the host app; never show those without a loaded session.
+    if (!hasSession() || !document.getElementById('login')?.hidden || !document.getElementById('grid')?.children.length) return [];
+    const includeHidden = typeof showHidden !== 'undefined' && showHidden && document.body.classList.contains('editing');
+    const needle = query.trim().toLocaleLowerCase();
+    return items.filter(f => (!isHidden(f) || includeHidden) && String(f.name || '').toLocaleLowerCase().includes(needle));
+  }
 
   const style = make('style', { textContent: `
     .vace-dialog { width:min(900px,calc(100vw - 24px)); max-height:90dvh; padding:0; }
@@ -36,6 +44,9 @@ window.VaceUI = (() => {
     .vace-content a.btn { display:inline-block; padding:8px 12px; }
     .vace-content progress { width:100%; accent-color:var(--accent); }
     .vace-content button:focus-visible,.vace-content a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+    .vace-video-list { display:grid; gap:6px; margin:10px 0; max-height:320px; overflow-y:auto; }
+    .vace-video-list button { display:grid; gap:4px; width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; padding:10px 12px; }
+    .vace-video-list small { color:var(--dim); font-size:12px; }
     @media(max-width:520px) { .vace-box-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } .vace-content { padding:12px; } }
   ` });
   document.head.append(style);
@@ -50,18 +61,33 @@ window.VaceUI = (() => {
   function open(file = null) {
     if (current) { current.dialog.focus(); return; }
     const abort = new AbortController(), urls = new Set();
-    const state = { upload: null, file, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0 };
+    const state = { upload: null, file: null, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0, page: 0 };
     const returnFocus = document.activeElement;
     const status = make('p', { role: 'status', ariaLive: 'polite', textContent: 'PC 도우미를 확인하는 중…' });
     const statusPanel = make('div', { className: 'vace-status' }, status);
     const connection = make('div');
     const progress = make('progress', { hidden: true, max: 100, value: 0 });
-    const localInput = make('input', { type: 'file', accept: 'video/*,.mp4,.mov,.mkv,.webm', ariaLabel: '테스트할 영상 파일' });
-    const sourceName = help(file ? `선택한 Drive 영상: ${file.name}` : '이 PC에서 테스트할 영상을 선택하세요.');
-    const uploadButton = button('영상을 PC에 준비', upload);
-    const sourceSection = make('section', {}, make('h3', { textContent: '1. 영상 준비' }), sourceName,
-      file ? help('선택한 Drive 영상을 이 PC의 도우미로 가져옵니다.') : localInput,
-      help('최대 2GB. 테스트 결과는 별도 파일로 내려받습니다.'), uploadButton, progress);
+    const sourceName = help('');
+    const uploadButton = button('이 영상으로 테스트 준비', upload, { disabled: true });
+    const search = make('input', { type: 'search', placeholder: '영상 제목 검색', ariaLabel: '갤러리 영상 제목 검색' });
+    const choices = make('div', { className: 'vace-video-list' });
+    const choiceNote = help('');
+    const previous = button('이전', () => { state.page--; renderChoices(); });
+    const next = button('다음', () => { state.page++; renderChoices(); });
+    const pageLabel = make('span', { className: 'hint', ariaLive: 'polite' });
+    const refreshChoices = button('목록 다시 확인', () => { state.page = 0; renderChoices(); });
+    const picker = make('div', {}, search, choiceNote, choices,
+      make('div', { className: 'row' }, previous, pageLabel, next, refreshChoices));
+    const changeSource = button('바꾸기', () => {
+      if (state.busy) return;
+      picker.hidden = false; state.page = 0; renderChoices(); updateRun(); search.focus();
+    });
+    const selection = make('div', { hidden: true }, make('div', { className: 'row' }, sourceName, changeSource));
+    const loginButton = button('Drive 다시 로그인', loginAgain, { hidden: true });
+    const sourceSection = make('section', {}, make('h3', { textContent: '1. 갤러리 영상 선택' }),
+      picker, selection, loginButton,
+      help('사이트에 있는 영상을 선택하면 이 PC로 가져와 테스트합니다. 최대 2GB이며 결과는 별도로 내려받습니다.'), uploadButton, progress);
+    search.oninput = () => { state.page = 0; renderChoices(); };
     const start = make('input', { type: 'number', min: 0, step: 0.1, value: '0' });
     const duration = make('input', { type: 'number', min: 1, max: 5, step: 0.5, value: '3' });
     const canvas = make('canvas', { width: 832, height: 480 });
@@ -162,11 +188,69 @@ window.VaceUI = (() => {
       const b = state.box;
       return b && b.every(n => Number.isFinite(n) && n >= 0 && n <= 1) && b[2] > b[0] && b[3] > b[1];
     }
-    function updateRun() { runButton.disabled = state.busy || !state.upload || !validBox(); }
+    function updateRun() {
+      runButton.disabled = state.busy || !state.upload || !validBox();
+      uploadButton.disabled = state.busy || !state.file || !picker.hidden || !hasSession();
+    }
     function busy(value) {
-      state.busy = value; uploadButton.disabled = value; localInput.disabled = value;
+      state.busy = value;
+      for (const input of [search, changeSource, refreshChoices, previous, next, ...choices.querySelectorAll('button')]) input.disabled = value;
       for (const input of [start, duration, kind, prompt, ...coords.map(c => c.input), ...previewButtons]) input.disabled = value;
+      if (!value && !picker.hidden) renderChoices();
       updateRun();
+    }
+    function renderChoices() {
+      if (state.busy) return;
+      const list = galleryChoices(search.value);
+      const pages = Math.max(1, Math.ceil(list.length / 30));
+      state.page = Math.max(0, Math.min(state.page, pages - 1));
+      choices.replaceChildren();
+      if (!hasSession()) {
+        choiceNote.textContent = '갤러리에 로그인하면 사이트의 영상 목록에서 바로 선택할 수 있어요. 이 창을 닫고 구글로 로그인하세요.';
+      } else if (!list.length) {
+        choiceNote.textContent = search.value.trim() ? '제목이 일치하는 영상이 없어요.' : '선택할 영상이 없어요. 갤러리 목록이 로딩 중이면 잠시 뒤 목록을 다시 확인하세요.';
+      } else {
+        choiceNote.textContent = `${list.length.toLocaleString()}개 영상 · 제목을 눌러 선택하세요.`;
+        for (const f of list.slice(state.page * 30, (state.page + 1) * 30)) {
+          const size = Number(f.size), seconds = Number(f.videoMediaMetadata?.durationMillis) / 1000;
+          const details = [Number.isFinite(seconds) && seconds > 0 ? `${Math.floor(seconds / 60)}분 ${Math.floor(seconds % 60)}초` : '',
+            size > 0 ? `${(size / 1024 ** 2).toFixed(0)}MB` : '크기 정보 없음', size > MAX_BYTES ? '2GB 초과' : ''].filter(Boolean).join(' · ');
+          const option = button('', () => choose(f), { disabled: !(size > 0 && size <= MAX_BYTES) });
+          option.append(make('span', { textContent: f.name }), make('small', { textContent: details }));
+          choices.append(option);
+        }
+      }
+      previous.disabled = state.page === 0; next.disabled = state.page + 1 >= pages;
+      pageLabel.textContent = list.length ? `${state.page + 1} / ${pages}` : '';
+      updateRun();
+    }
+    function choose(f) {
+      if (state.busy) return;
+      if (!galleryChoices().some(item => item.id === f.id)) { renderChoices(); return message('로그인 상태와 갤러리 목록을 다시 확인하세요.', true); }
+      const size = Number(f.size);
+      if (!(size > 0 && size <= MAX_BYTES)) return message('2GB 이하이며 크기 정보가 있는 영상을 선택하세요.', true);
+      state.file = f; state.upload = null; state.box = null; state.frameRequest++;
+      state.image?.close?.(); state.image = null;
+      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      for (const video of result.querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); }
+      for (const url of urls) URL.revokeObjectURL(url);
+      urls.clear(); result.replaceChildren();
+      settings.hidden = generation.hidden = result.hidden = canvasBox.hidden = boxFields.hidden = true;
+      coords.forEach(c => { c.input.value = ''; }); start.value = '0'; duration.value = '3';
+      sourceName.textContent = `선택한 영상: ${f.name}`;
+      selection.hidden = false; picker.hidden = true; loginButton.hidden = true;
+      message('영상을 선택했어요. 이 영상으로 테스트 준비를 눌러 구간과 얼굴 영역을 지정하세요.');
+      updateRun(); uploadButton.focus();
+    }
+    async function loginAgain() {
+      loginButton.disabled = true;
+      try {
+        await relogin();
+        if (abort.signal.aborted) return;
+        if (hasSession()) { loginButton.hidden = true; message('Drive에 다시 로그인했어요. 영상 준비를 이어갑니다.'); }
+        else message('로그인을 완료하지 못했어요. 다시 로그인해 주세요.', true);
+      } catch (error) { fail(error); }
+      finally { loginButton.disabled = false; updateRun(); }
     }
     function times() {
       const s = Number(start.value), d = Number(duration.value);
@@ -175,18 +259,22 @@ window.VaceUI = (() => {
       return { start: s, duration: d };
     }
     async function upload() {
-      const source = file || localInput.files[0];
-      if (!source) return message('테스트할 영상 파일을 선택하세요.', true);
+      const source = state.file;
+      if (!source || state.busy) return message('갤러리에서 테스트할 영상을 선택하세요.', true);
+      if (!hasSession()) { loginButton.hidden = false; return message('Drive 로그인이 만료됐어요. 이 창에서 다시 로그인하세요.', true); }
       const size = Number(source.size);
       if (!size || size > MAX_BYTES) return message('0바이트보다 크고 2GB 이하인 영상으로 테스트하세요.', true);
-      if (!await health()) return;
-      busy(true); progress.hidden = false; progress.value = 0;
+      busy(true);
+      if (!await health()) { busy(false); return; }
+      progress.hidden = false; progress.value = 0;
       settings.hidden = generation.hidden = result.hidden = true;
       state.upload = null; state.box = null; state.frameRequest++;
       try {
         const upload = await jsonPost('/uploads', { name: source.name, size });
-        const read = file ? MergeUI.tools.driveRead(file, abort.signal, on => { if (on) message('Drive 로그인을 기다리고 있어요. 갤러리에서 다시 로그인하세요.'); })
-          : (a, b) => source.slice(a, b).arrayBuffer();
+        const read = MergeUI.tools.driveRead(source, abort.signal, on => {
+          loginButton.hidden = !on;
+          if (on) message('Drive 로그인이 만료되어 기다리는 중이에요. 아래의 Drive 다시 로그인을 눌러 이어가세요.');
+        });
         for (let offset = 0; offset < size;) {
           const end = Math.min(offset + CHUNK, size);
           await request(`/uploads/${encodeURIComponent(upload.id)}?offset=${offset}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: await read(offset, end) });
@@ -295,8 +383,12 @@ window.VaceUI = (() => {
       result.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
     const old = remembered();
+    renderChoices();
     if (old?.id) { state.job = old; busy(true); message('진행 중이던 작업을 확인하는 중…'); poll(); }
-    else health();
+    else {
+      if (file) choose(file);
+      health();
+    }
   }
 
   const header = document.querySelector('header');
