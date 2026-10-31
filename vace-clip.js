@@ -10,8 +10,8 @@ globalThis.VaceClip = (() => {
   function fail(message, code) { const error = new Error(message); error.code = code; return error; }
 
   /**
-   * read(start, end) uses exclusive end and MUST reject non-206/wrong-range responses
-   * before buffering the body. Use MergeUI.tools.driveRead(..., {strictRanges:true}).
+   * read(start, end) uses exclusive end and MUST reject non-206 responses before buffering
+   * the body and any body whose length differs from end - start (Drive hides Content-Range from CORS). Use MergeUI.tools.driveRead(..., {strictRanges:true}).
    * start is the source player's time; the returned MP4 starts at zero.
    * onProgress receives {phase: 'metadata'|'extract'|'done', progress, bytesRead}.
    */

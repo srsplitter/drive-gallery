@@ -172,8 +172,9 @@ const MergeUI = (() => {
       try {
         const r = await api(`${DRIVE}/files/${f.id}?alt=media`, { headers: { Range: `bytes=${start}-${end - 1}` }, signal });
         if (strictRanges) {
-          const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(r.headers.get('Content-Range') || '');
-          if (r.status !== 206 || !range || +range[1] !== start || +range[2] !== end - 1 || +range[3] !== +f.size) {
+          // Drive 는 CORS 로 Content-Range 를 보여 주지 않음(Expose-Headers 에 없어 늘 null) → 206 + 받은 길이로 확인
+          // 파일 전체를 물었을 때만 200 도 받음 (sw.js 와 같은 규칙)
+          if (r.status !== 206 && !(r.status === 200 && start === 0 && end === +f.size)) {
             await r.body?.cancel().catch(() => {});
             throw rangeError('Drive가 요청한 구간만 반환하지 않았어요. 전체 다운로드를 중단했습니다.');
           }
