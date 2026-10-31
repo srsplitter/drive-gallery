@@ -163,15 +163,43 @@ const MergeUI = (() => {
     setStatus('');
     if (onWait) onWait(false);
   }
-  const driveRead = (f, signal, onWait) => async (start, end) => {
+  const driveRead = (f, signal, onWait, { strictRanges = false } = {}) => async (start, end) => {
+    const rangeError = message => Object.assign(new Error(message), { invalidRange: true });
+    if (strictRanges && (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end > +f.size || end - start > CHUNK)) {
+      throw rangeError('구간 읽기 범위가 올바르지 않아요. 전체 영상 다운로드로 전환하지 않습니다.');
+    }
     for (let tries = 0; ; tries++) {
       try {
         const r = await api(`${DRIVE}/files/${f.id}?alt=media`, { headers: { Range: `bytes=${start}-${end - 1}` }, signal });
+        if (strictRanges) {
+          const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(r.headers.get('Content-Range') || '');
+          if (r.status !== 206 || !range || +range[1] !== start || +range[2] !== end - 1 || +range[3] !== +f.size) {
+            await r.body?.cancel().catch(() => {});
+            throw rangeError('Drive가 요청한 구간만 반환하지 않았어요. 전체 다운로드를 중단했습니다.');
+          }
+          if (!r.body) throw rangeError('Drive 구간 응답이 비어 있어요.');
+          const reader = r.body.getReader(), buf = new Uint8Array(end - start);
+          let received = 0;
+          try {
+            for (;;) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (received + value.byteLength > buf.length) {
+                await reader.cancel().catch(() => {});
+                throw rangeError('Drive가 요청 범위보다 많은 데이터를 보냈어요. 다운로드를 중단했습니다.');
+              }
+              buf.set(value, received); received += value.byteLength;
+            }
+          } finally { reader.releaseLock(); }
+          if (received !== buf.length) throw rangeError('Drive에서 받은 구간 길이가 맞지 않아요.');
+          return buf;
+        }
         const buf = new Uint8Array(await r.arrayBuffer());
         if (buf.length !== end - start) throw new Error(`"${f.name}" 을(를) 읽다가 길이가 맞지 않아요`);
         return buf;
       } catch (e) {
         if (signal.aborted) throw e;
+        if (e.invalidRange) throw e;
         if (e instanceof AuthError) { await waitLogin(signal, onWait); continue; }
         if (tries < 3) { await sleep(1500 * (tries + 1)); continue; }
         throw e;

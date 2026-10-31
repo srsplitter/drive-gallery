@@ -56,6 +56,7 @@ window.VaceUI = (() => {
     .vace-video-tags { display:flex; flex-wrap:wrap; gap:4px; }
     .vace-video-tag { padding:2px 6px; border:1px solid var(--line); border-radius:6px; font-size:11px; color:var(--dim); }
     .vace-video-tag.match { color:var(--text); border-color:var(--accent); }
+    .vace-selected-poster .vace-video-thumb { width:min(280px,100%); }
     @media(max-width:520px) { .vace-box-fields { grid-template-columns:repeat(2,minmax(0,1fr)); } .vace-content { padding:12px; } }
   ` });
   document.head.append(style);
@@ -70,7 +71,7 @@ window.VaceUI = (() => {
   function open(file = null) {
     if (current) { current.dialog.focus(); return; }
     const abort = new AbortController(), urls = new Set();
-    const state = { upload: null, file: null, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0, page: 0, choiceVersion: 0, availableBytes: null };
+    const state = { upload: null, file: null, clipRange: null, image: null, box: null, busy: false, polling: null, job: null, frameRequest: 0, page: 0, choiceVersion: 0, availableBytes: null };
     const thumbnails = new Set();
     const returnFocus = document.activeElement;
     const status = make('p', { role: 'status', ariaLive: 'polite', textContent: 'PC 도우미를 확인하는 중…' });
@@ -78,7 +79,7 @@ window.VaceUI = (() => {
     const connection = make('div');
     const progress = make('progress', { hidden: true, max: 100, value: 0 });
     const sourceName = help('');
-    const uploadButton = button('이 영상으로 테스트 준비', upload, { disabled: true });
+    const uploadButton = button('선택 구간 준비', upload, { disabled: true });
     const search = make('input', { type: 'search', placeholder: '제목 또는 태그 검색', ariaLabel: '갤러리 영상 제목 또는 태그 검색' });
     const choices = make('div', { className: 'vace-video-list' });
     const choiceNote = help('');
@@ -90,16 +91,29 @@ window.VaceUI = (() => {
       make('div', { className: 'row' }, previous, pageLabel, next, refreshChoices));
     const changeSource = button('바꾸기', () => {
       if (state.busy) return;
+      invalidateClip(); state.file = null;
+      rangeSection.hidden = true;
       picker.hidden = false; state.page = 0; renderChoices(); updateRun(); search.focus();
     });
     const selection = make('div', { hidden: true }, make('div', { className: 'row' }, sourceName, changeSource));
     const loginButton = button('Drive 다시 로그인', loginAgain, { hidden: true });
     const sourceSection = make('section', {}, make('h3', { textContent: '1. 갤러리 영상 선택' }),
-      picker, selection, loginButton,
-      help('테스트 전에 전체 영상을 이 PC로 가져옵니다. 파일 크기만큼의 디스크 공간과 처리용 추가 여유 공간이 필요하며, 도우미가 남은 용량을 확인합니다. 결과는 별도로 내려받습니다.'), uploadButton, progress);
+      picker, selection, loginButton);
     search.oninput = () => { state.page = 0; renderChoices(); };
     const start = make('input', { type: 'number', min: 0, step: 0.1, value: '0' });
     const duration = make('input', { type: 'number', min: 1, max: 5, step: 0.5, value: '3' });
+    const rangeNote = help('');
+    const poster = make('div', { className: 'vace-selected-poster' });
+    const clipVideo = make('video', { controls: true, playsInline: true, preload: 'metadata', hidden: true });
+    const rangeSection = make('section', { hidden: true }, make('h3', { textContent: '2. 테스트 구간 선택' }), poster,
+      make('div', { className: 'vace-fields' }, label('원본 시작 시간 (초)', start), label('테스트 길이 (1~5초)', duration)), rangeNote,
+      help('선택한 구간만 잘라 PC 도우미에 보냅니다. 구간을 읽기 위한 파일 색인과 직전 키프레임 데이터도 일부 가져올 수 있습니다.'),
+      uploadButton, progress, clipVideo);
+    start.oninput = duration.oninput = () => {
+      if (state.busy) return;
+      invalidateClip(); updateRangeNote(); updateRun();
+      message('구간이 바뀌었어요. 선택 구간 준비를 다시 눌러 주세요.');
+    };
     const canvas = make('canvas', { width: 832, height: 480 });
     canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-label', '영상 미리보기. 드래그하거나 아래 좌표를 입력해 얼굴 영역을 지정하세요.');
@@ -119,8 +133,7 @@ window.VaceUI = (() => {
       return { input, label: label(text, input) };
     });
     const boxFields = make('div', { className: 'vace-fields vace-box-fields', hidden: true }, coords.map(c => c.label));
-    const settings = make('section', { hidden: true }, make('h3', { textContent: '2. 구간과 얼굴 영역' }),
-      make('div', { className: 'vace-fields' }, label('시작 시간 (초)', start), label('테스트 길이 (1~5초)', duration)),
+    const settings = make('section', { hidden: true }, make('h3', { textContent: '3. 얼굴 영역' }),
       make('div', { className: 'row' }, previewButtons), canvasBox, boxFields,
       help('얼굴의 모자이크를 모두 포함하도록 드래그하세요. 시작·중간·끝 장면에서 같은 박스 안에 얼굴이 들어오는지 확인하세요.'),
       help('이 테스트는 고정된 영역을 사용합니다. 얼굴이 크게 움직이거나 다른 물체에 가려지면 구간을 짧게 줄이세요.'));
@@ -133,11 +146,11 @@ window.VaceUI = (() => {
     prompt.value = defaultPrompt();
     kind.onchange = () => { prompt.value = defaultPrompt(); };
     const runButton = button('가상 얼굴 테스트 시작', generate, { className: 'primary', disabled: true });
-    const generation = make('section', { hidden: true }, make('h3', { textContent: '3. 가상 얼굴' }),
+    const generation = make('section', { hidden: true }, make('h3', { textContent: '4. 가상 얼굴' }),
       label('얼굴 유형', kind), label('얼굴 설명 (직접 수정 가능)', prompt),
       help('얼굴 품질과 처리 속도를 확인하는 실험 기능입니다. 생성 중에는 PC를 켜 두세요.'), runButton);
     const result = make('section', { hidden: true });
-    const content = make('div', { className: 'vace-content' }, statusPanel, connection, sourceSection, settings, generation, result);
+    const content = make('div', { className: 'vace-content' }, statusPanel, connection, sourceSection, rangeSection, settings, generation, result);
     const dialog = make('dialog', { className: 'vace-dialog' },
       make('div', { className: 'v-head' }, make('div', { id: 'vaceTitle', className: 'title', textContent: '가상 얼굴 테스트' }), button('닫기', () => dialog.close())), content);
     dialog.setAttribute('aria-labelledby', 'vaceTitle');
@@ -181,7 +194,7 @@ window.VaceUI = (() => {
         const value = await (await request('/health', { signal: healthAbort.signal })).json();
         state.availableBytes = Number.isSafeInteger(value.available_upload_bytes) ? value.available_upload_bytes : null;
         connection.replaceChildren();
-        if (value.ready) message('이 PC의 VACE 도우미와 연결됐어요.' + (state.availableBytes === null ? ' 짧은 영상으로 결과를 확인하세요.' : ` 현재 가져올 수 있는 영상 크기: ${formatSize(state.availableBytes)}.`));
+        if (value.ready) message('이 PC의 VACE 도우미와 연결됐어요. 선택한 짧은 구간으로 테스트할 수 있어요.');
         else message(value.error || 'PC 도우미는 연결됐지만 모델을 준비 중이에요. 잠시 뒤 다시 확인하세요.', true);
         connection.append(button('도우미 다시 확인', health));
         return value.ready;
@@ -201,7 +214,7 @@ window.VaceUI = (() => {
       return b && b.every(n => Number.isFinite(n) && n >= 0 && n <= 1) && b[2] > b[0] && b[3] > b[1];
     }
     function updateRun() {
-      runButton.disabled = state.busy || !state.upload || !validBox();
+      runButton.disabled = state.busy || !state.upload || !state.clipRange || !validBox();
       uploadButton.disabled = state.busy || !state.file || !picker.hidden || !hasSession();
     }
     function busy(value) {
@@ -216,14 +229,14 @@ window.VaceUI = (() => {
       for (const img of thumbnails) { img.onerror = null; img.removeAttribute('src'); }
       thumbnails.clear();
     }
-    function thumbnail(f) {
+    function thumbnail(f, selected = false) {
       const version = state.choiceVersion;
       const box = make('span', { className: 'vace-video-thumb', textContent: '🎞️' });
       const img = make('img', { alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
       thumbnails.add(img);
       const custom = gallery.videos[f.id];
       const fallback = f.thumbnailLink ? f.thumbnailLink.replace(/=s\d+$/, '=s480') : '';
-      const active = () => box.isConnected && !abort.signal.aborted && version === state.choiceVersion && hasSession() && !picker.hidden &&
+      const active = () => box.isConnected && !abort.signal.aborted && version === state.choiceVersion && hasSession() && (selected ? state.file === f : !picker.hidden) &&
         (!isHidden(f) || (showHidden && document.body.classList.contains('editing')));
       let usingFallback = false;
       const show = src => {
@@ -280,19 +293,31 @@ window.VaceUI = (() => {
       if (!galleryChoices().some(item => item.id === f.id)) { renderChoices(); return message('로그인 상태와 갤러리 목록을 다시 확인하세요.', true); }
       const size = Number(f.size);
       if (!validSize(size)) return message('파일 크기 정보를 확인할 수 있는 영상을 선택하세요.', true);
-      state.file = f; state.upload = null; state.box = null; state.frameRequest++;
+      state.file = f;
+      invalidateClip();
+      const total = sourceDuration();
+      let initial = 0;
+      const nativeVideo = typeof viewerFile !== 'undefined' && viewerFile?.id === f.id ? document.querySelector('#vBody video') : null;
+      if (nativeVideo && Number.isFinite(nativeVideo.currentTime) && Number.isFinite(total)) initial = Math.min(nativeVideo.currentTime, Math.max(0, total - 1));
+      start.value = (Math.floor(initial * 10) / 10).toFixed(1);
+      duration.value = String(Number.isFinite(total) ? Math.min(3, Math.max(1, Math.floor((total - Number(start.value)) * 10) / 10)) : 3);
+      sourceName.textContent = `선택한 영상: ${f.name}`;
+      selection.hidden = false; picker.hidden = true; loginButton.hidden = true; rangeSection.hidden = false;
+      clearThumbnails(); poster.replaceChildren(thumbnail(f, true));
+      updateRangeNote();
+      message('원본에서 테스트할 시작 시간과 길이를 고른 뒤 선택 구간 준비를 누르세요.');
+      updateRun(); start.focus();
+    }
+    function invalidateClip() {
+      state.upload = null; state.clipRange = null; state.box = null; state.frameRequest++;
       state.image?.close?.(); state.image = null;
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      clipVideo.pause(); clipVideo.removeAttribute('src'); clipVideo.load(); clipVideo.hidden = true;
       for (const video of result.querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); }
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear(); result.replaceChildren();
       settings.hidden = generation.hidden = result.hidden = canvasBox.hidden = boxFields.hidden = true;
-      coords.forEach(c => { c.input.value = ''; }); start.value = '0'; duration.value = '3';
-      sourceName.textContent = `선택한 영상: ${f.name}`;
-      selection.hidden = false; picker.hidden = true; loginButton.hidden = true;
-      clearThumbnails();
-      message('영상을 선택했어요. 이 영상으로 테스트 준비를 눌러 구간과 얼굴 영역을 지정하세요.');
-      updateRun(); uploadButton.focus();
+      coords.forEach(c => { c.input.value = ''; });
     }
     async function loginAgain() {
       loginButton.disabled = true;
@@ -304,61 +329,80 @@ window.VaceUI = (() => {
       } catch (error) { fail(error); }
       finally { loginButton.disabled = false; updateRun(); }
     }
+    function sourceDuration() {
+      const total = Number(state.file?.videoMediaMetadata?.durationMillis) / 1000;
+      return Number.isFinite(total) && total > 0 ? total : NaN;
+    }
+    function updateRangeNote() {
+      const total = sourceDuration(), s = Number(start.value), d = Number(duration.value);
+      const length = Number.isFinite(total) ? `원본 길이 ${total.toFixed(2)}초` : '원본 길이는 구간을 준비할 때 확인합니다';
+      rangeNote.textContent = `${length} · 선택 구간 ${s.toFixed(2)}~${(s + d).toFixed(2)}초`;
+    }
     function times() {
       const s = Number(start.value), d = Number(duration.value);
       if (!Number.isFinite(s) || s < 0 || !Number.isFinite(d) || d < 1 || d > 5) throw new Error('시작 시간과 1~5초 길이를 확인하세요.');
-      if (state.upload?.duration && s + d > state.upload.duration + 0.001) throw new Error('선택한 구간이 영상 길이를 넘어요. 시작 시간이나 길이를 줄이세요.');
+      const total = sourceDuration();
+      if (Number.isFinite(total) && s + d > total + 0.001) throw new Error('선택한 구간이 원본 영상 길이를 넘어요. 시작 시간이나 길이를 줄이세요.');
       return { start: s, duration: d };
     }
     async function upload() {
       const source = state.file;
       if (!source || state.busy) return message('갤러리에서 테스트할 영상을 선택하세요.', true);
       if (!hasSession()) { loginButton.hidden = false; return message('Drive 로그인이 만료됐어요. 이 창에서 다시 로그인하세요.', true); }
-      const size = Number(source.size);
-      if (!validSize(size)) return message('영상의 파일 크기 정보가 올바르지 않아요. 목록을 다시 확인하세요.', true);
+      if (!validSize(Number(source.size))) return message('영상의 파일 크기 정보가 올바르지 않아요. 목록을 다시 확인하세요.', true);
+      let range;
+      try { range = times(); } catch (error) { return fail(error); }
       busy(true);
       if (!await health()) { busy(false); return; }
-      if (state.availableBytes !== null && size > state.availableBytes) {
-        busy(false);
-        return message(`PC의 여유 공간이 부족해요. 영상 크기 ${formatSize(size)}, 현재 가져올 수 있는 크기 ${formatSize(state.availableBytes)}입니다.`, true);
-      }
-      progress.hidden = false; progress.value = 0;
-      settings.hidden = generation.hidden = result.hidden = true;
-      state.upload = null; state.box = null; state.frameRequest++;
+      invalidateClip(); progress.hidden = false; progress.removeAttribute('value');
       try {
-        const upload = await jsonPost('/uploads', { name: source.name, size });
+        if (!window.VaceClip?.extract) throw new Error('구간 추출 도구를 불러오지 못했어요. 사이트를 새로고침해 주세요.');
         const read = MergeUI.tools.driveRead(source, abort.signal, on => {
           loginButton.hidden = !on;
-          if (on) message('Drive 로그인이 만료되어 기다리는 중이에요. 아래의 Drive 다시 로그인을 눌러 이어가세요.');
-        });
+          if (on) message('Drive 로그인이 만료되어 기다리는 중이에요. 아래의 Drive 다시 로그인을 눌러 구간 준비를 이어가세요.');
+        }, { strictRanges: true });
+        const clip = await window.VaceClip.extract({ file: source, read, ...range, signal: abort.signal,
+          onProgress: event => {
+            if (abort.signal.aborted) return;
+            if (Number.isFinite(event.progress)) progress.value = event.progress * 100; else progress.removeAttribute('value');
+            message(`${event.phase === 'metadata' ? '영상 색인 확인 중' : '선택 구간 준비 중'} · 원본 ${range.start.toFixed(2)}~${(range.start + range.duration).toFixed(2)}초 · 읽은 데이터 ${formatSize(event.bytesRead || 0)}`);
+          } });
+        if (abort.signal.aborted) return;
+        const size = clip.blob.size;
+        if (!validSize(size)) throw new Error('준비한 구간 파일이 비어 있어요. 다른 구간으로 시도하세요.');
+        if (state.availableBytes !== null && size > state.availableBytes) throw new Error(`PC의 여유 공간이 부족해요. 테스트 구간 파일은 ${formatSize(size)}, 현재 받을 수 있는 크기는 ${formatSize(state.availableBytes)}입니다.`);
+        const upload = await jsonPost('/uploads', { name: clip.name, size });
+        progress.value = 0;
         for (let offset = 0; offset < size;) {
           const end = Math.min(offset + CHUNK, size);
-          await request(`/uploads/${encodeURIComponent(upload.id)}?offset=${offset}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: await read(offset, end) });
+          await request(`/uploads/${encodeURIComponent(upload.id)}?offset=${offset}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: clip.blob.slice(offset, end) });
           offset = end; progress.value = 100 * offset / size;
-          message(`전체 영상을 PC로 가져오는 중 · ${formatSize(offset)} / ${formatSize(size)}`);
+          message(`선택 구간만 PC 도우미에 보내는 중 · ${formatSize(offset)} / ${formatSize(size)}`);
         }
         state.upload = await (await request(`/uploads/${encodeURIComponent(upload.id)}`)).json();
-        sourceName.textContent = `${source.name} · ${Number(state.upload.duration).toFixed(1)}초`;
-        if (state.upload.duration < 1) throw new Error('1초 이상의 영상이 필요해요.');
-        start.value = '0'; duration.value = String(Math.min(3, Math.floor(state.upload.duration * 10) / 10));
+        const preparedDuration = Math.min(range.duration, Number(clip.duration), Number(state.upload.duration));
+        if (!(preparedDuration >= 1)) { state.upload = null; throw new Error('준비된 구간이 1초보다 짧아요. 테스트 길이를 늘려 다시 준비하세요.'); }
+        state.clipRange = { ...range, preparedDuration };
+        const url = URL.createObjectURL(clip.blob); urls.add(url); clipVideo.src = url; clipVideo.hidden = false;
+        clipVideo.setAttribute('aria-label', `원본 ${range.start.toFixed(2)}초부터 준비한 테스트 구간`);
+        updateRangeNote();
         settings.hidden = generation.hidden = false;
         await preview(0);
       } catch (error) { fail(error); }
       finally { busy(false); progress.hidden = true; }
     }
     async function preview(fraction) {
-      if (!state.upload) return;
+      if (!state.upload || !state.clipRange) return;
       const own = ++state.frameRequest;
       try {
-        const range = times();
-        const time = range.start + Math.max(0, range.duration - 1 / 16) * fraction;
+        const time = Math.max(0, state.clipRange.preparedDuration - 1 / 16) * fraction;
         const blob = await (await request(`/uploads/${encodeURIComponent(state.upload.id)}/frame?time=${time.toFixed(4)}`)).blob();
         const image = await createImageBitmap(blob);
         if (own !== state.frameRequest || abort.signal.aborted) { image.close(); return; }
         state.image?.close?.(); state.image = image;
         canvas.width = image.width; canvas.height = image.height;
         canvasBox.hidden = boxFields.hidden = false; draw();
-        message(`${time.toFixed(2)}초 장면. 모자이크 전체를 덮을 얼굴 영역을 지정하세요.`);
+        message(`원본 ${(state.clipRange.start + time).toFixed(2)}초 장면 (테스트 구간 ${time.toFixed(2)}초). 모자이크 전체를 덮을 얼굴 영역을 지정하세요.`);
       } catch (error) { fail(error); }
     }
     function draw() {
@@ -386,13 +430,14 @@ window.VaceUI = (() => {
     canvas.onpointercancel = () => { drag = null; };
 
     async function generate() {
-      if (!validBox() || state.busy) return;
+      if (!validBox() || state.busy || !state.upload || !state.clipRange) return;
       try {
-        const range = times();
+        const selected = times();
+        if (selected.start !== state.clipRange.start || selected.duration !== state.clipRange.duration) throw new Error('선택 구간이 바뀌었어요. 선택 구간 준비를 다시 눌러 주세요.');
         if (!prompt.value.trim()) throw new Error('가상 얼굴 설명을 입력하세요.');
         busy(true); result.hidden = true;
-        const job = await jsonPost('/jobs', { upload_id: state.upload.id, ...range, box: state.box, prompt: prompt.value.trim() });
-        state.job = { id: job.id, at: Date.now() }; remember(state.job);
+        const job = await jsonPost('/jobs', { upload_id: state.upload.id, start: 0, duration: state.clipRange.preparedDuration, box: state.box, prompt: prompt.value.trim() });
+        state.job = { id: job.id, at: Date.now(), sourceStart: state.clipRange.start, sourceDuration: job.duration }; remember(state.job);
         message('PC에서 테스트를 시작했어요. 준비와 생성에 시간이 걸릴 수 있어요.');
         poll();
       } catch (error) { busy(false); fail(error); }
@@ -426,7 +471,9 @@ window.VaceUI = (() => {
       if (abort.signal.aborted) return;
       const compareVideo = make('video', { src: comparison, controls: true, playsInline: true, preload: 'metadata' });
       const caption = help('왼쪽: 원본 · 오른쪽: 가상 얼굴 결과');
-      result.replaceChildren(make('h3', { textContent: '테스트 결과' }), caption, compareVideo,
+      const origin = Number.isFinite(state.job?.sourceStart) && Number.isFinite(state.job?.sourceDuration)
+        ? help(`처리 구간: 원본 ${state.job.sourceStart.toFixed(2)}~${(state.job.sourceStart + state.job.sourceDuration).toFixed(2)}초 (생성 가능한 프레임 수에 맞춰 끝부분이 조금 짧아질 수 있습니다.)`) : null;
+      result.replaceChildren(make('h3', { textContent: '테스트 결과' }), ...(origin ? [origin] : []), caption, compareVideo,
         make('div', { className: 'row' },
           button('전후 비교 보기', () => { compareVideo.pause(); compareVideo.src = comparison; caption.textContent = '왼쪽: 원본 · 오른쪽: 가상 얼굴 결과'; }),
           button('결과만 보기', () => { compareVideo.pause(); compareVideo.src = output; caption.textContent = '가상 얼굴 결과'; })),
