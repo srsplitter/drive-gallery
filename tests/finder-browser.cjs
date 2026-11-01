@@ -33,19 +33,28 @@ const video = `<ul>
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({ contentType: file.endsWith('.js') ? 'application/javascript' : 'text/html; charset=utf-8', body: fs.readFileSync(file) });
   });
+  // 이미지 검색 결과 페이지: 사이트 목록은 상태 JSON(data-state) 에 실림. 장면마다 다른 결과(mirror 는 장면 1·2 에서 나옴)
+  const imagePage = sites => `<div class="Root" data-state="${JSON.stringify({ initialState: { cbirSites: { sites } } }).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></div>`;
+  // 실제 사본(장면 2장, 제목 일부 일치)과 닮은 사람(장면 3장 모두, 제목 무관 — 실제 Yandex 에서 그대로 나옴)
+  const mirror = { url: 'https://mirror.example/watch/123', title: 'Some Model hot video 123', description: 'mirror copy', thumb: { url: '//avatars.mds.yandex.net/i?id=m' } };
+  const lookalike = { url: 'https://news.example/ceo', title: 'CEO ousted from billionaire ranks' };
+  const images = [imagePage([lookalike, mirror, { url: 'https://other.example/a', title: 'unrelated' }]), imagePage([lookalike, mirror]), imagePage([lookalike, { url: 'javascript:alert(1)', title: 'bad' }])];
   // "개인 영상 저장" 확장 대신: 웹·동영상 검색 결과 HTML 을 돌려줌 (window.extMode 로 없음·로봇 확인 흉내)
-  await page.addInitScript(({ web, video }) => {
+  await page.addInitScript(({ web, video, images }) => {
     window.asked = [];
     window.chrome = { runtime: { sendMessage(id, message, reply) {
-      window.asked.push({ id, ...message });
+      window.asked.push({ id, ...message, jpeg: message.jpeg && message.jpeg.length });
       setTimeout(() => {
         if (window.extMode === 'none') return reply(undefined);
         if (message.type === 'ping') return reply({ ok: true });
         if (window.extMode === 'captcha') return reply({ ok: true, captcha: true, html: '' });
+        if (message.type === 'frames') return reply({ ok: true, title: 'Some Model clip', duration: 400,
+          frames: [100, 200, 300].map(at => ({ at, jpeg: btoa('frame' + at) })) });
+        if (message.type === 'yandex-image') return reply({ ok: true, html: images[window.asked.filter(m => m.type === 'yandex-image').length - 1] });
         reply({ ok: true, captcha: false, html: message.kind === 'web' ? web : video });
       }, 10);
     } } };
-  }, { web, video });
+  }, { web, video, images });
   try {
     await page.goto('https://gallery.test/');
     await page.evaluate(() => {
@@ -61,8 +70,8 @@ const video = `<ul>
     await page.locator('#catbar').getByRole('button', { name: '검색', exact: true }).click();
     assert.equal(await page.locator('#finderView').count(), 1);
     assert.equal(await page.locator('#grid .card').count(), 0, 'the gallery videos are not shown on the search screen');
-    await page.locator('.finder-input').fill('Gattouz0 2026-02-08');
-    await page.locator('.finder-input').press('Enter');
+    await page.locator('.finder-input').first().fill('Gattouz0 2026-02-08');
+    await page.locator('.finder-input').first().press('Enter');
     await page.locator('.finder-item').first().waitFor();
     const asked = await page.evaluate(() => window.asked.filter(m => m.type === 'yandex-search').map(m => [m.id, m.kind, m.query]));
     assert.deepEqual(asked, [['ipfhbkdamknanblcidakndcjcbajjoke', 'web', 'Gattouz0 2026-02-08'], ['ipfhbkdamknanblcidakndcjcbajjoke', 'video', 'Gattouz0 2026-02-08']]);
@@ -73,6 +82,26 @@ const video = `<ul>
     assert.equal(await page.locator('.finder-item[href^="javascript"]').count(), 0, 'non-http links dropped');
     assert.equal(await page.locator('.finder-item').count(), 4);
     assert.equal(await page.locator('.finder-item').first().getAttribute('target'), '_blank');
+    // 링크로 찾기: 장면 3장 → (이름 칸이 비었으니) 영상 제목으로 이름 검색 → 제목 일치 없음 → 장면 3장 이미지 검색
+    await page.locator('.finder-input').first().fill('');
+    await page.locator('.finder-input').nth(1).fill('https://site.example/v/1');
+    await page.getByRole('button', { name: '링크로 찾기', exact: true }).click();
+    await page.getByText('비슷한 장면 2/3', { exact: false }).waitFor();
+    const calls = await page.evaluate(() => window.asked.slice(-6).map(m => [m.type, m.url || m.query || m.kind, m.jpeg]));
+    assert.deepEqual(calls.slice(0, 3).map(c => c.slice(0, 2)), [['frames', 'https://site.example/v/1'], ['yandex-search', 'Some Model clip'], ['yandex-search', 'Some Model clip']]);
+    assert.deepEqual(calls.slice(3).map(c => c[0]), ['yandex-image', 'yandex-image', 'yandex-image'], 'all three frames searched');
+    assert.equal(await page.locator('.finder-input').first().inputValue(), 'Some Model clip', 'name box filled with the video title');
+    assert.deepEqual(await page.locator('.finder-frames figcaption').allTextContents(), ['1:40', '3:20', '5:00']);
+    const best = page.locator('.finder-list').first().locator('.finder-item').first();
+    assert.equal(await best.getAttribute('href'), 'https://mirror.example/watch/123', 'similar frames + a partly matching title come first');
+    assert.match(await best.textContent(), /mirror\.example · 일부 일치 · 비슷한 장면 2\/3/);
+    assert.equal(await best.locator('img').getAttribute('src'), 'https://avatars.mds.yandex.net/i?id=m');
+    assert.equal(await page.locator('.finder-list').first().locator('.finder-item').count(), 1, 'only the copy is "likely"');
+    const look = page.locator('.finder-item', { hasText: 'CEO ousted' });
+    assert.match(await look.textContent(), /비슷한 장면 3\/3/);
+    assert.equal(await look.evaluate(n => n.classList.contains('match')), false, 'a look-alike in every frame is not called the same video');
+    assert.equal(await page.locator('.finder-item[href^="javascript"]').count(), 0);
+    assert.match(await page.locator('.finder-item', { hasText: 'unrelated' }).textContent(), /비슷한 장면 1\/3/);
     await page.screenshot({ path: path.join(root, 'tests', 'finder-desktop.png'), fullPage: true });
     await page.evaluate(() => { window.extMode = 'captcha'; });
     await page.getByRole('button', { name: '검색', exact: true }).last().click();
@@ -83,6 +112,23 @@ const video = `<ul>
     await page.getByText('확장이 없거나 꺼져 있어요', { exact: false }).waitFor();
     await page.setViewportSize({ width: 375, height: 812 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll on a phone');
+    // 확장 패널 [찾기] 로 열림: #find=표&q=이름 → 바로 [검색] 탭, 표로 장면을 받고 이름 칸에 페이지 제목, 주소에서 표는 지움
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const ticket = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    await page.goto(`https://gallery.test/?fresh#find=${ticket}&q=${encodeURIComponent('Some Model 2026-02-08')}`); // ?fresh: a real load, not a hash change
+    await page.evaluate(() => {
+      prefetchCandidates = () => {}; needsShare = () => false;
+      token = 'fixture'; tokenExp = Date.now() + 3600000;
+      gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {} };
+      items = [{ id: 'a', name: 'a.mp4', mimeType: 'video/mp4', videoMediaMetadata: { durationMillis: '10000' } }];
+      $('#setup').hidden = true; renderGrid();
+    });
+    await page.locator('#finderView').waitFor();
+    await page.locator('.finder-frames figure').first().waitFor();
+    assert.deepEqual(await page.evaluate(() => { const m = window.asked.find(x => x.type === 'frames'); return [m.id, m.ticket, m.url]; }), ['ipfhbkdamknanblcidakndcjcbajjoke', ticket, undefined]);
+    assert.equal(await page.locator('.finder-input').first().inputValue(), 'Some Model 2026-02-08', 'page title in the name box');
+    assert.equal(await page.evaluate(() => location.hash), '', 'ticket removed from the address');
+    assert.equal(await page.locator('#catbar .chip.on').textContent(), '검색');
     assert.deepEqual(errors, []);
     console.log('finder-browser: ok');
   } finally { await browser.close(); }
