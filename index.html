@@ -147,9 +147,12 @@
   .card-tags { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px; padding: 7px 10px 9px; flex: 1; border-top: 1px solid var(--line); background: rgba(0,0,0,.28); }
   .card-tags .fav-star { color: #ffc531; font-weight: normal; margin-right: 2px; } /* 즐겨찾기 태그 */
   .card-tags span { font-size: 11px; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; line-height: 18px; }
+  body.editing .card-tags { cursor: text; } /* 수정 ON: 누르면 태그 추가 */
+  .card-tags-empty span { border-style: dashed; }
   .pill.tag-kind-category, .pill.tag-kind-category.on, .card-tags span.tag-kind-category { border-color: #ff4f9a; }
   .pill.tag-kind-character, .pill.tag-kind-character.on, .card-tags span.tag-kind-character { border-color: #57b878; }
   .pill.tag-kind-genre, .pill.tag-kind-genre.on, .card-tags span.tag-kind-genre { border-color: #ffc531; }
+  .pill.tag-kind-site, .pill.tag-kind-site.on, .card-tags span.tag-kind-site { border-color: #4c8dff; }
   @media (max-width: 520px), (pointer: coarse) { .card-tags { display: none; } }
   .m-in.card-in { padding: 2px 6px; font-size: 13px; border-color: var(--accent); }
   body.editing .card .name:not(.dur-line) { cursor: text; }
@@ -245,6 +248,20 @@
   .series-row.active { border-color: #ffc531; }
   .series-open { flex: 1; text-align: left; min-width: 140px; }
   .series-playlist-title { font-size: 16px; margin: 18px 0 12px; }
+  /* [사이트] 탭: 시리즈처럼 한 줄씩, 이름 아래에 사이트로 가는 칸 (주소 없으면 빈칸). 누른 줄은 파란 테두리 */
+  .site-row { display: grid; gap: 6px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-left: 3px solid #4c8dff; border-radius: 10px; cursor: pointer; }
+  .site-row:hover { border-color: var(--dim); border-left-color: #4c8dff; }
+  .site-row.active { border-color: #4c8dff; }
+  .site-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .site-main b { overflow-wrap: anywhere; }
+  .site-main .cnt { color: var(--dim); font-size: 13px; }
+  .site-link { justify-self: start; max-width: 100%; min-height: 30px; min-width: 160px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--accent); font-size: 13px; text-align: left; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.site-link:hover { border-color: var(--accent); }
+  .site-link.empty { color: var(--dim); }
+  body.editing .site-link.empty { border-style: dashed; }
+  .site-url-in { justify-self: stretch; padding: 5px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+  #siteView > .site-library > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600; margin: 22px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   .series-reorder-item { min-width: 0; cursor: grab; }
   .series-reorder-item .card { height: 100%; cursor: grab; }
   #seriesEditor .row { margin-top: 14px; }
@@ -549,7 +566,8 @@
 <script src="video-merge.js?v=20261017-renum4"></script>
 <script src="merge-ui.js?v=20261101-range1"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
-<script src="finder-ui.js?v=20261101-find3"></script>
+<script src="finder-ui.js?v=20261101-find5"></script>
+<script src="site-ui.js?v=20261101-site1"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -760,7 +778,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {}, knownTags: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {}, knownTags: {}, siteUrls: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -770,7 +788,7 @@ let saving = false, saveError = '', retryTimer = null;
 // ---------- 되돌리기 ([복원] 버튼) ----------
 // 백업 파일 없이, 바뀌기 직전 값만 기억해 두었다가 반대로 적용 (페이지를 닫으면 사라짐).
 // 2초 넘게 쉬었다가 생긴 변경은 새 묶음 → [복원] 한 번에 가장 최근 묶음 하나씩 거꾸로. 태그·종류·즐겨찾기·별·숨김 등 + 드라이브 파일 이름
-const UNDO_KEYS = ['h:', 't:', 'f:', 'c:', 'x:', 'l:', 'k:', 'm:', 's:', 'o:', 'p:', 'n:'];
+const UNDO_KEYS = ['h:', 't:', 'f:', 'c:', 'x:', 'l:', 'k:', 'm:', 's:', 'o:', 'p:', 'n:', 'w:'];
 const undoStack = []; // [{ gallery: Map(key → 이전 값/null), names: Map(파일 ID → 이전 이름) }]
 let undoShadow = null, undoLast = 0, undoing = false; // undoShadow: 마지막으로 아는 값 (바뀌기 직전 값을 꺼내는 곳)
 const undoCopy = v => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
@@ -852,11 +870,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings', 'knownTags']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings', 'knownTags', 'siteUrls']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings', 'n:': 'knownTags' };
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings', 'n:': 'knownTags', 'w:': 'siteUrls' }; // w: 사이트 태그 → 그 사이트 주소
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -1045,8 +1063,8 @@ function tagCounts() {
   return counts;
 }
 function sortedTags(f, counts = tagCounts()) {
-  const kindOrder = { category: 0, genre: 1, character: 2, normal: 3 };
-  return [...tagsOf(f)].sort((a, b) => (kindOrder[tagKind(a)] ?? 3) - (kindOrder[tagKind(b)] ?? 3)
+  const kindOrder = { category: 0, genre: 1, character: 2, site: 3, normal: 4 };
+  return [...tagsOf(f)].sort((a, b) => (kindOrder[tagKind(a)] ?? 4) - (kindOrder[tagKind(b)] ?? 4)
     || (counts.get(b) || 0) - (counts.get(a) || 0) || window.GalleryOrder.compareText(a, b));
 }
 const tagKind = t => gallery.tagKinds[t] || 'normal';
@@ -1097,6 +1115,7 @@ function deleteTag(t) {
   if (isFav(t)) { delete gallery.fav[t]; pendingSaves.set('f:' + t, null); }
   if (gallery.knownTags[t]) { delete gallery.knownTags[t]; pendingSaves.set('n:' + t, null); }
   if (gallery.exUse[t]) { delete gallery.exUse[t]; pendingSaves.set('x:' + t, null); }
+  if (gallery.siteUrls[t]) { delete gallery.siteUrls[t]; pendingSaves.set('w:' + t, null); }
   const drop = list => list.filter(x => x !== t);
   filters.tags = drop(filters.tags);
   filters.ex = drop(filters.ex);
@@ -1148,6 +1167,11 @@ function renameTag(from, to) {
   delete gallery.tagKinds[from];
   pendingSaves.set('k:' + from, null);
   if (!merging) setTagKind(to, kind);
+  // 사이트 주소도 새 이름으로 (합치는 태그에 이미 주소가 있으면 그것을 둠)
+  if (gallery.siteUrls[from]) {
+    if (!gallery.siteUrls[to]) { gallery.siteUrls[to] = gallery.siteUrls[from]; pendingSaves.set('w:' + to, gallery.siteUrls[to]); }
+    delete gallery.siteUrls[from]; pendingSaves.set('w:' + from, null);
+  }
   for (const f of items) {
     const tags = tagsOf(f);
     if (!tags.includes(from)) continue;
@@ -1618,6 +1642,7 @@ function renderGrid() {
   else if (currentView === 'title') { $('#grid').replaceChildren(TitleEditor.render(shown, counts)); ManualOrderUI.bind(); }
   else if (currentView === 'mosaic') $('#grid').replaceChildren(DecensorUI.view(shown, counts));
   else if (currentView === 'finder') $('#grid').replaceChildren(FinderUI.view());
+  else if (currentView === 'site') { $('#grid').replaceChildren(SiteUI.view(shown, counts)); renderMoveMemos(); }
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
@@ -1649,7 +1674,7 @@ function renderGrid() {
   else setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
   renderCatbar();
   if (viewer.open && viewerFile) SeriesUI.viewerNav(viewerFile);
-  if (SeriesUI.mode || currentView === 'series' || currentView === 'title' || currentView === 'mosaic' || currentView === 'finder') $('#editNote').hidden = true;
+  if (SeriesUI.mode || currentView === 'series' || currentView === 'title' || currentView === 'mosaic' || currentView === 'finder' || currentView === 'site') $('#editNote').hidden = true;
   if (SeriesUI.mode) setStatus('시리즈 지정: 썸네일을 재생 순서대로 누른 뒤 저장하세요.');
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -1667,7 +1692,7 @@ const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'cate
 
 function directoryTabs() {
   const order = ['normal', 'genre', 'character', 'category'];
-  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀'], ['mosaic', '모자이크'], ['finder', '검색']].map(([kind, label]) => {
+  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀'], ['site', '사이트'], ['mosaic', '모자이크'], ['finder', '검색']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
@@ -1739,10 +1764,17 @@ function renderDirectory() {
     onDelete: editing ? async () => { if (await confirmBox(`"${t}" 태그를 삭제하시겠습니까? (모든 영상에서 빠져요)`)) deleteTag(t); } : null
   }), items.filter(f => tagsOf(f).includes(t))))));
   DirectoryThumbs.layout($('#grid .tag-directory'));
+  renderMoveMemos();
+}
+// 목록 맨 아래 "○○(으)로 이동" 메모 (수정 ON): 이 목록의 태그를 다른 유형으로 옮김.
+// [사이트] 는 [태그] 와만 오감 (태그 목록에 "사이트(으)로 이동", 사이트 목록에 "태그(으)로 이동")
+function renderMoveMemos() {
   const memos = $('#directoryMemos');
   if (memos.dataset.view === currentView) return; // 같은 목록에서는 입력 중인 메모와 포커스를 유지
   memos.dataset.view = currentView;
-  memos.replaceChildren(...directoryKinds.filter(([kind]) => kind !== currentView).map(([kind, label]) => {
+  const targets = currentView === 'site' ? [['normal', '태그']]
+    : [...directoryKinds.filter(([kind]) => kind !== currentView), ...(currentView === 'normal' ? [['site', '사이트']] : [])];
+  memos.replaceChildren(...targets.map(([kind, label]) => {
     const ta = el('textarea', { placeholder: '이 목록의 기존 태그 입력 → ' + label + '(으)로 이동' });
     const done = el('button', { className: 'primary done', textContent: '전송' });
     done.onclick = () => {
@@ -1858,14 +1890,19 @@ function videoCard(f, counts = tagCounts()) {
       if (e.clientX >= d.left && e.clientX <= d.right && e.clientY >= d.top && e.clientY <= d.bottom) return deleteFromList(f);
     }
     if (cardRenaming || Date.now() - cardRenameEnded < 400) return; // 이름 고치는 중이거나, 다른 곳을 눌러 막 저장한 클릭
-    const r = nameEl.getBoundingClientRect();
-    const inName = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    if (document.body.classList.contains('editing') && inName && e.detail !== 0) return startCardRename(f, nameEl);
+    const inside = node => { const r = node?.getClientRects().length ? node.getBoundingClientRect() : null;
+      return r && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; };
+    if (document.body.classList.contains('editing') && inside(nameEl) && e.detail !== 0) return startCardRename(f, nameEl);
+    // 수정 ON: 태그 줄을 누르면 그 자리에서 태그 추가 (제목처럼)
+    if (document.body.classList.contains('editing') && inside(tagsEl) && e.detail !== 0) return startCardTagAdd(f, tagsEl);
     open();
   };
+  // PC: 이 영상의 태그. 태그가 없으면 수정 ON 에서만 "＋ 태그" 자리
+  const tagsEl = tagsOf(f).length
+    ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t) }, isFav(t) ? el('b', { className: 'fav-star', textContent: '★' }) : null, t)))
+    : el('div', { className: 'card-tags card-tags-empty edit-only' }, el('span', { textContent: '＋ 태그' }));
   const card = el('button', { className: 'card', draggable: false, onclick: onCard },
-    thumb, nameEl,
-    tagsOf(f).length ? el('div', { className: 'card-tags' }, ...sortedTags(f, counts).map(t => el('span', { className: 'tag-kind-' + tagKind(t) }, isFav(t) ? el('b', { className: 'fav-star', textContent: '★' }) : null, t))) : null, // PC: 이 영상의 태그
+    thumb, nameEl, tagsEl,
     dur ? el('div', { className: 'name dur-line', textContent: fmtTime(dur / 1000) }) : null,
     delEl);
   card.dataset.id = f.id;
@@ -2280,6 +2317,34 @@ function startCardRename(f, nameEl) {
     if (e.key === 'Enter') { e.preventDefault(); finish(true); }
     else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
   };
+  input.onblur = () => finish(true);
+}
+
+// 목록 카드의 태그 줄에서 태그 추가 (수정 ON): 제목 고치기처럼 태그 줄 위에 뜬 입력칸.
+// 쉼표·띄어쓰기로 여러 개, Enter·다른 곳 클릭 = 추가, Esc = 취소. 이미 붙은 태그는 그대로
+function startCardTagAdd(f, tagsEl) {
+  if (cardRenaming) return;
+  const r = tagsEl.getBoundingClientRect();
+  const input = el('input', { className: 'm-in card-in', value: '', placeholder: '태그 추가 (쉼표로 여러 개)', spellcheck: false });
+  Object.assign(input.style, { position: 'fixed', left: r.left + 'px', top: r.top + 'px', width: Math.max(r.width, 160) + 'px', minHeight: r.height + 'px', zIndex: 40 });
+  document.body.append(input);
+  cardRenaming = input;
+  input.focus();
+  let done = false;
+  const onScroll = () => input.blur();
+  addEventListener('scroll', onScroll, { passive: true, once: true });
+  const finish = save => {
+    if (done) return;
+    done = true;
+    removeEventListener('scroll', onScroll);
+    const added = parseTags(input.value).filter(t => !tagsOf(f).includes(t));
+    input.remove();
+    cardRenaming = null;
+    cardRenameEnded = Date.now();
+    if (save && added.length) setTags(f, [...tagsOf(f), ...added]);
+  };
+  memoKeys(input, () => finish(true));
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
   input.onblur = () => finish(true);
 }
 

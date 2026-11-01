@@ -26,6 +26,8 @@ const FinderUI = (() => {
   const yandexThumb = value => { const url = safeUrl(String(value || '').replace(/^\/\//, 'https://')); return /^https:\/\/[^/]*yandex\.net\//.test(url) ? url : ''; };
   const text = node => (node?.textContent || '').replace(/\s+/g, ' ').trim();
   const keyOf = url => url.replace(/[?#].*$/, '').replace(/\/$/, '');
+  // 장면 시각. 영상 길이를 몰라 페이지 썸네일로 찾을 때는 시각이 없음(null)
+  const when = at => (at === null ? '페이지 썸네일' : fmt(at));
   const fmt = sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, s = Math.floor(sec % 60); return (h ? `${h}:${String(m).padStart(2, '0')}` : m) + ':' + String(s).padStart(2, '0'); };
 
   function parseWeb(html) {
@@ -52,14 +54,16 @@ const FinderUI = (() => {
       let sites;
       try { sites = JSON.parse(node.getAttribute('data-state'))?.initialState?.cbirSites?.sites; } catch { continue; }
       // 관련도 순이라 뒤쪽은 거의 무관한 결과: 장면마다 앞 40개만
-      if (Array.isArray(sites)) return sites.slice(0, 40).map(s => ({ url: safeUrl(s?.url), title: String(s?.title || ''), snippet: String(s?.description || '').slice(0, 200), thumb: yandexThumb(s?.thumb?.url) })).filter(r => r.url);
+      // original: 그 사이트에 실제로 있는 이미지. Yandex 썸네일은 성인 이미지면 흐리게 오므로(세이프서치) 원본을 먼저 씀
+      if (Array.isArray(sites)) return sites.slice(0, 40).map(s => ({ url: safeUrl(s?.url), title: String(s?.title || ''), snippet: String(s?.description || '').slice(0, 200),
+        thumb: yandexThumb(s?.thumb?.url), original: safeUrl(s?.originalImage?.url) })).filter(r => r.url);
     }
     return [];
   }
   function add(list, scene) {
     for (const r of list) {
       const key = keyOf(r.url), old = found.get(key) || { scenes: new Set() };
-      found.set(key, { ...old, ...r, title: old.title || r.title, snippet: old.snippet || r.snippet || '', duration: old.duration || r.duration || '', thumb: old.thumb || r.thumb || '' });
+      found.set(key, { ...old, ...r, title: old.title || r.title, snippet: old.snippet || r.snippet || '', duration: old.duration || r.duration || '', thumb: old.thumb || r.thumb || '', original: old.original || r.original || '' });
       if (scene !== undefined) found.get(key).scenes.add(scene);
     }
   }
@@ -79,13 +83,14 @@ const FinderUI = (() => {
     state = 'busy'; status = `"${query}" 이름으로 찾는 중…`; renderGrid();
     const replies = await Promise.all(['web', 'video'].map(kind => ask({ type: 'yandex-search', kind, query })));
     if (replies.every(r => fail(r, '이름 검색'))) return;
-    problem = ''; extOk = true;
+    // 하나만 로봇 확인에 걸려도 알려 줌 (남은 쪽 결과는 그대로 보여 주되, 웹 검색이 막히면 결과가 크게 줄어듦)
+    problem = replies.some(r => r?.captcha) ? 'captcha' : ''; extOk = true;
     add(replies[0]?.html ? parseWeb(replies[0].html) : []);
     add(replies[1]?.html ? parseVideo(replies[1].html) : []);
   }
   async function imageSearch() {
     for (const [i, frame] of frames.entries()) {
-      state = 'busy'; status = `장면 ${i + 1}/${frames.length} (${fmt(frame.at)}) 이미지로 찾는 중…`; renderGrid();
+      state = 'busy'; status = `장면 ${i + 1}/${frames.length} (${when(frame.at)}) 이미지로 찾는 중…`; renderGrid();
       const reply = await ask({ type: 'yandex-image', jpeg: frame.src.split(',')[1] });
       if (fail(reply, '이미지 검색')) return;
       add(reply.html ? parseImage(reply.html) : [], i);
@@ -107,7 +112,7 @@ const FinderUI = (() => {
     frames = (reply.frames || []).map(f => ({ at: f.at, src: 'data:image/jpeg;base64,' + f.jpeg }));
     if (!query && reply.title) query = reply.title;
     await nameSearch();
-    if (!problem && !results().some(r => r.score >= 0.999)) await imageSearch();
+    if ((!problem || problem === 'captcha') && !results().some(r => r.score >= 0.999)) await imageSearch();
     finish();
   }
   async function scenesOnly() {
@@ -115,11 +120,20 @@ const FinderUI = (() => {
     problem = ''; await imageSearch(); finish();
   }
 
+  // 원본 이미지 → 안 열리면(막힘·삭제) Yandex 썸네일 → 그것도 없으면 사이트 첫 글자
+  function picture(r) {
+    const letter = () => el('div', { className: 'finder-noimg', textContent: hostOf(r.url).slice(0, 1).toUpperCase() });
+    const sources = [r.original, r.thumb].filter(Boolean);
+    if (!sources.length) return letter();
+    const img = el('img', { src: sources.shift(), alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' });
+    img.onerror = () => { if (sources.length) img.src = sources.shift(); else img.replaceWith(letter()); };
+    return img;
+  }
   function card(r) {
     const level = r.score >= 0.999 ? '제목 일치' : r.score >= 0.5 ? '일부 일치' : '';
     const scenes = r.scenes.size ? `비슷한 장면 ${r.scenes.size}/${frames.length || 3}` : '';
     return el('a', { className: 'finder-item' + (likely(r) ? ' match' : ''), href: r.url, target: '_blank', rel: 'noopener noreferrer' },
-      r.thumb ? el('img', { src: r.thumb, alt: '', loading: 'lazy', referrerPolicy: 'no-referrer' }) : el('div', { className: 'finder-noimg', textContent: hostOf(r.url).slice(0, 1).toUpperCase() }),
+      picture(r),
       el('div', { className: 'finder-body' },
         el('b', { textContent: r.title || hostOf(r.url) }),
         el('span', { className: 'finder-meta', textContent: [hostOf(r.url), r.duration, level, scenes].filter(Boolean).join(' · ') }),
@@ -158,9 +172,9 @@ const FinderUI = (() => {
       el('div', { className: 'row' }, linkInput,
         el('button', { className: 'primary', textContent: '링크로 찾기', disabled: busy, onclick: () => searchLink(linkInput.value, nameInput.value) })),
       el('p', { className: 'hint' + (problem || extOk === false ? ' error' : ''), textContent: note }),
-      problem === 'captcha' ? el('a', { className: 'button', href: 'https://yandex.com/images/', target: '_blank', rel: 'noopener', textContent: 'Yandex 열기' }) : null,
+      problem === 'captcha' ? el('a', { className: 'button', href: `https://yandex.com/search/?text=${encodeURIComponent(query || '')}`, target: '_blank', rel: 'noopener', textContent: 'Yandex 열기' }) : null,
       frames.length ? el('div', { className: 'finder-frames' }, ...frames.map(f => el('figure', {},
-        el('img', { src: f.src, alt: '' }), el('figcaption', { textContent: fmt(f.at) }))),
+        el('img', { src: f.src, alt: '' }), el('figcaption', { textContent: when(f.at) }))),
         el('button', { textContent: '장면으로 찾기', disabled: busy, onclick: scenesOnly })) : null);
     const list = results(), top = list.filter(likely), rest = list.filter(r => !likely(r));
     return el('div', { id: 'finderView' }, panel,

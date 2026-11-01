@@ -28,6 +28,8 @@ const video = `<ul>
   page.on('pageerror', e => errors.push(e.message));
   await page.route('**/*', async route => {
     const u = new URL(route.request().url());
+    // 이미지: 원본 사이트(cdn.mirror.example)와 Yandex 썸네일은 작은 그림, broken.example 원본은 막힘
+    if (['cdn.mirror.example', 'avatars.mds.yandex.net'].includes(u.hostname)) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64') });
     if (u.hostname !== 'gallery.test') return route.abort();
     const file = path.resolve(root, '.' + (u.pathname === '/' ? '/index.html' : u.pathname));
     if (!file.startsWith(root + path.sep) || !fs.existsSync(file)) return route.fulfill({ status: 404, body: '' });
@@ -36,8 +38,8 @@ const video = `<ul>
   // 이미지 검색 결과 페이지: 사이트 목록은 상태 JSON(data-state) 에 실림. 장면마다 다른 결과(mirror 는 장면 1·2 에서 나옴)
   const imagePage = sites => `<div class="Root" data-state="${JSON.stringify({ initialState: { cbirSites: { sites } } }).replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></div>`;
   // 실제 사본(장면 2장, 제목 일부 일치)과 닮은 사람(장면 3장 모두, 제목 무관 — 실제 Yandex 에서 그대로 나옴)
-  const mirror = { url: 'https://mirror.example/watch/123', title: 'Some Model hot video 123', description: 'mirror copy', thumb: { url: '//avatars.mds.yandex.net/i?id=m' } };
-  const lookalike = { url: 'https://news.example/ceo', title: 'CEO ousted from billionaire ranks' };
+  const mirror = { url: 'https://mirror.example/watch/123', title: 'Some Model hot video 123', description: 'mirror copy', thumb: { url: '//avatars.mds.yandex.net/i?id=m' }, originalImage: { url: 'https://cdn.mirror.example/orig.jpg' } };
+  const lookalike = { url: 'https://news.example/ceo', title: 'CEO ousted from billionaire ranks', thumb: { url: '//avatars.mds.yandex.net/i?id=l' }, originalImage: { url: 'https://broken.example/x.jpg' } };
   const images = [imagePage([lookalike, mirror, { url: 'https://other.example/a', title: 'unrelated' }]), imagePage([lookalike, mirror]), imagePage([lookalike, { url: 'javascript:alert(1)', title: 'bad' }])];
   // "개인 영상 저장" 확장 대신: 웹·동영상 검색 결과 HTML 을 돌려줌 (window.extMode 로 없음·로봇 확인 흉내)
   await page.addInitScript(({ web, video, images }) => {
@@ -47,7 +49,8 @@ const video = `<ul>
       setTimeout(() => {
         if (window.extMode === 'none') return reply(undefined);
         if (message.type === 'ping') return reply({ ok: true });
-        if (window.extMode === 'captcha') return reply({ ok: true, captcha: true, html: '' });
+        if (window.extMode === 'captcha' || (window.extMode === 'webCaptcha' && message.kind === 'web')) return reply({ ok: true, captcha: true, html: '' });
+        if (message.type === 'frames' && window.extMode === 'thumbOnly') return reply({ ok: true, title: 'Thumb only clip', duration: null, frames: [{ at: null, jpeg: btoa('thumb') }] });
         if (message.type === 'frames') return reply({ ok: true, title: 'Some Model clip', duration: 400,
           frames: [100, 200, 300].map(at => ({ at, jpeg: btoa('frame' + at) })) });
         if (message.type === 'yandex-image') return reply({ ok: true, html: images[window.asked.filter(m => m.type === 'yandex-image').length - 1] });
@@ -95,7 +98,10 @@ const video = `<ul>
     const best = page.locator('.finder-list').first().locator('.finder-item').first();
     assert.equal(await best.getAttribute('href'), 'https://mirror.example/watch/123', 'similar frames + a partly matching title come first');
     assert.match(await best.textContent(), /mirror\.example · 일부 일치 · 비슷한 장면 2\/3/);
-    assert.equal(await best.locator('img').getAttribute('src'), 'https://avatars.mds.yandex.net/i?id=m');
+    // 원본 이미지가 먼저 (Yandex 썸네일은 성인 이미지면 흐림), 원본이 막히면 Yandex 썸네일로
+    await page.waitForFunction(() => [...document.querySelectorAll('.finder-item img')].every(i => i.complete));
+    assert.equal(await best.locator('img').getAttribute('src'), 'https://cdn.mirror.example/orig.jpg');
+    assert.equal(await page.locator('.finder-item', { hasText: 'CEO ousted' }).locator('img').getAttribute('src'), 'https://avatars.mds.yandex.net/i?id=l');
     assert.equal(await page.locator('.finder-list').first().locator('.finder-item').count(), 1, 'only the copy is "likely"');
     const look = page.locator('.finder-item', { hasText: 'CEO ousted' });
     assert.match(await look.textContent(), /비슷한 장면 3\/3/);
@@ -103,6 +109,22 @@ const video = `<ul>
     assert.equal(await page.locator('.finder-item[href^="javascript"]').count(), 0);
     assert.match(await page.locator('.finder-item', { hasText: 'unrelated' }).textContent(), /비슷한 장면 1\/3/);
     await page.screenshot({ path: path.join(root, 'tests', 'finder-desktop.png'), fullPage: true });
+    // 영상 길이를 몰라 페이지 썸네일 한 장만 온 경우: '페이지 썸네일' 로 표시하고 그 한 장으로 이미지 검색
+    await page.evaluate(() => { window.extMode = 'thumbOnly'; window.asked.length = 0; });
+    await page.locator('.finder-input').first().fill('');
+    await page.locator('.finder-input').nth(1).fill('https://late-player.example/video/1');
+    await page.getByRole('button', { name: '링크로 찾기', exact: true }).click();
+    await page.locator('.finder-frames figcaption', { hasText: '페이지 썸네일' }).waitFor();
+    await page.waitForFunction(() => window.asked.filter(m => m.type === 'yandex-image').length === 1 && !document.querySelector('#finderView .hint').textContent.includes('찾는 중'));
+    assert.deepEqual(await page.locator('.finder-frames figcaption').allTextContents(), ['페이지 썸네일']);
+    await page.evaluate(() => { window.extMode = undefined; });
+    // 웹 검색만 로봇 확인에 걸림: 동영상 검색 결과는 보여 주고, 로봇 확인 안내도 함께 (웹 검색 주소로 여는 버튼)
+    await page.evaluate(() => { window.extMode = 'webCaptcha'; });
+    await page.locator('.finder-input').first().fill('Gattouz0 2026-02-08');
+    await page.getByRole('button', { name: '검색', exact: true }).last().click();
+    await page.getByText('로봇 확인', { exact: false }).waitFor();
+    assert.ok(await page.locator('.finder-item').count() >= 1, 'the video search results still show');
+    assert.equal(await page.getByRole('link', { name: 'Yandex 열기' }).getAttribute('href'), 'https://yandex.com/search/?text=Gattouz0%202026-02-08');
     await page.evaluate(() => { window.extMode = 'captcha'; });
     await page.getByRole('button', { name: '검색', exact: true }).last().click();
     await page.getByText('로봇 확인', { exact: false }).waitFor();
