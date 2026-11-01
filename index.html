@@ -316,7 +316,22 @@
   #confirmDlg { width: min(420px, 100vw - 32px); }
   #confirmDlg p { margin: 0; line-height: 1.5; }
   /* 구역 이름(즐겨찾기·추천·동영상): 아래에도 구분선 — 위 구분선과 같은 선, 이름과 카드 사이 간격 */
-  #starVideos h2, #favoriteVideos h2, #regularVideos > h2.section-title, #mosaicView > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600;
+  /* [검색] 탭: 다른 사이트에서 찾은 같은 영상 목록 (제목 일치는 파란 테두리) */
+  #finderView .finder { margin-bottom: 18px; }
+  .finder .row { display: flex; gap: 8px; }
+  .finder-input { flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; }
+  .finder-input:focus { outline: none; border-color: var(--accent); }
+  .finder-list { display: grid; gap: 8px; margin-bottom: 22px; }
+  .finder-item { display: flex; gap: 12px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); text-decoration: none; }
+  .finder-item:hover { border-color: var(--dim); }
+  .finder-item.match { border-color: var(--accent); }
+  .finder-item img, .finder-noimg { flex: none; width: 128px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: var(--bg); }
+  .finder-noimg { display: grid; place-items: center; color: var(--dim); font-size: 22px; font-weight: 700; }
+  .finder-body { display: grid; gap: 3px; min-width: 0; }
+  .finder-body b { overflow-wrap: anywhere; }
+  .finder-meta { color: var(--dim); font-size: 12px; }
+  .finder-snippet { color: var(--dim); font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  #starVideos h2, #favoriteVideos h2, #regularVideos > h2.section-title, #mosaicView > h2.section-title, #finderView > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600;
     margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   /* 분류 칸 수정 ON: 즐겨찾기·수정·휴지통이 아래 3칸을 빈틈없이 나눠 씀, 휴지통은 빨강 */
   body.editing .tag-directory .star, body.editing .tag-directory .pen, body.editing .tag-directory .bin {
@@ -530,6 +545,7 @@
 <script src="video-merge.js?v=20261017-renum4"></script>
 <script src="merge-ui.js?v=20261101-range1"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
+<script src="finder-ui.js?v=20261101-find1"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
@@ -1592,11 +1608,12 @@ function renderGrid() {
   if (currentView === 'title') shown = TitleEditor.filter(shown);
   if (currentView === 'mosaic') shown = DecensorUI.filter(shown);
   $('#bulkTag').hidden = !!currentView;
-  $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title' || currentView === 'mosaic';
+  $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title' || currentView === 'mosaic' || currentView === 'finder';
   renderBulk();
   if (currentView === 'series') $('#grid').replaceChildren(SeriesUI.library());
   else if (currentView === 'title') { $('#grid').replaceChildren(TitleEditor.render(shown, counts)); ManualOrderUI.bind(); }
   else if (currentView === 'mosaic') $('#grid').replaceChildren(DecensorUI.view(shown, counts));
+  else if (currentView === 'finder') $('#grid').replaceChildren(FinderUI.view());
   else if (currentView) renderDirectory();
   else {
     const regular = el('div', { id: 'regularVideos' }, SeriesUI.grid(shown, counts));
@@ -1628,7 +1645,7 @@ function renderGrid() {
   else setStatus(items.length ? '' : '드라이브에 내가 올린 영상이 없어요.');
   renderCatbar();
   if (viewer.open && viewerFile) SeriesUI.viewerNav(viewerFile);
-  if (SeriesUI.mode || currentView === 'series' || currentView === 'title' || currentView === 'mosaic') $('#editNote').hidden = true;
+  if (SeriesUI.mode || currentView === 'series' || currentView === 'title' || currentView === 'mosaic' || currentView === 'finder') $('#editNote').hidden = true;
   if (SeriesUI.mode) setStatus('시리즈 지정: 썸네일을 재생 순서대로 누른 뒤 저장하세요.');
   prefetchCandidates(); // 썸네일이 정해질 때마다 "다음 10개"가 바뀜
 }
@@ -1645,7 +1662,7 @@ const shownCats = () => [...tagCounts().keys()].filter(t => tagKind(t) === 'cate
 
 function directoryTabs() {
   const order = ['normal', 'genre', 'character', 'category'];
-  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀'], ['mosaic', '모자이크']].map(([kind, label]) => {
+  return [...order.map(k => directoryKinds.find(([kind]) => kind === k)), ['series', '시리즈'], ['title', '타이틀'], ['mosaic', '모자이크'], ['finder', '검색']].map(([kind, label]) => {
     const b = el('button', {
       className: 'chip' + (currentView === kind ? ' on' : ''), textContent: label,
       onclick: () => {
