@@ -1,4 +1,9 @@
-// 헤더 [편집] → 영상 합치기 (수정 ON, PC 크롬·엣지).
+// 카테고리 바 [편집] 탭 (수정 ON, PC 크롬·엣지): 위쪽 탭으로 [영상 합치기] / [자동 썸네일].
+// [자동 썸네일]: 맨 앞 1초 썸네일을 아직 안 넣은 영상만 보여 줌(넣은 영상은 gallery.intro, 변경 키 'i:').
+//   지정 썸네일이 있는 영상을 눌러 고르고 시작 → 영상마다 [지정 썸네일 1초] + 영상으로 다시 압축 → 같은 드라이브 파일에 덮어씀
+//   (파일 ID 그대로라 이름·태그·시리즈·표지 등 사이트 정보가 그대로, 드라이브에 이전 버전이 남음). 다 올라가기 전에 멈추면 원본 그대로.
+//   지정 썸네일이 없는 영상은 흐리게 보이고 고를 수 없음. 합치기와 같은 작업 줄에서 하나씩 차례로 → 다른 탭에 가도 계속.
+// [영상 합치기]:
 // 필터·검색으로 영상을 찾고 썸네일을 누르면 누른 순서대로 담김 → 합친 영상 맨 앞 1초에 넣을 장면을 하나 고름
 // (담은 영상들의 지정 썸네일 중에서, 또는 영상 아래 가위로 그 영상의 한 지점을 찍어서)
 // → 이름을 정하고 [합치기] → 드라이브에서 조금씩 읽어 합치고 조금씩 드라이브에 올림 → 다 올라간 걸 확인한 뒤에만 원본을 휴지통으로.
@@ -14,16 +19,34 @@ const MergeUI = (() => {
   // 대기 중이거나 진행 중인 작업에 들어간 영상 (다른 작업에 또 담지 못하게) + 모자이크 해제 대기열에 든 영상
   const reserved = () => new Set([...unfinished().flatMap(j => j.list.map(p => p.f.id)), ...DecensorUI.reservedIds()]);
   let picks = []; // [{ f }] 담은 순서
+  let tab = 'merge'; // 편집 화면 위쪽 탭: 'merge' | 'auto'
+  let autoPicks = []; // 자동 썸네일로 고른 영상 [f] (누른 순서)
+  const introMap = () => gallery.intro || (gallery.intro = {});
+  const hasThumb = f => { const c = gallery.videos[f.id]; return !!(c && (c.thumb || c.file)); };
   let intro = null; // 합친 영상 맨 앞 1초 장면 { img: 캔버스·이미지, url: 미리보기, key: 고른 썸네일의 영상 ID | null(가위로 찍음) }
   let nameDraft = '', nameError = ''; // nameError: 이름 칸 아래 빨간 안내
   const isPC = () => !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && 'VideoEncoder' in window;
 
   function toggleMode() {
     active = !active;
-    if (!active) { picks = []; intro = null; }
+    if (!active) { picks = []; intro = null; autoPicks = []; }
+    renderGrid();
+  }
+  // 다른 탭으로 감: 편집 화면만 닫음 (담은 것·작업은 그대로)
+  function leave() { active = false; }
+  function setTab(t) { tab = t; renderGrid(); }
+  // 자동 썸네일 탭에서는 이미 1초 썸네일을 넣은 영상을 목록에서 뺌
+  const filter = list => active && tab === 'auto' ? list.filter(f => !introMap()[f.id]) : list;
+  function autoToggle(f) {
+    const at = autoPicks.findIndex(x => x.id === f.id);
+    if (at >= 0) { autoPicks.splice(at, 1); return renderGrid(); }
+    if (reserved().has(f.id)) return setStatus(`"${f.name}" 은(는) 이미 다른 작업(합치기·자동 썸네일·모자이크 해제)에 들어 있어요.`, true);
+    if (!hasThumb(f)) return setStatus(`"${f.name}" 은(는) 지정한 썸네일이 없어요. 영상 창에서 썸네일을 먼저 지정해 주세요.`, true);
+    autoPicks.push(f);
     renderGrid();
   }
   function toggle(f) {
+    if (tab === 'auto') return autoToggle(f);
     const at = picks.findIndex(p => p.f.id === f.id);
     if (at < 0 && reserved().has(f.id)) return setStatus(`"${f.name}" 은(는) 이미 다른 합치기 작업이나 모자이크 해제 대기열에 들어 있어요.`, true);
     if (at >= 0) picks.splice(at, 1); else picks.push({ f });
@@ -33,6 +56,14 @@ const MergeUI = (() => {
   function decorate(card, f) {
     if (!active) return;
     if (reserved().has(f.id)) { card.classList.add('merge-reserved'); return; }
+    if (tab === 'auto') {
+      if (!hasThumb(f)) { card.classList.add('auto-nothumb'); return; }
+      const at = autoPicks.findIndex(x => x.id === f.id);
+      if (at < 0) return;
+      card.classList.add('merge-picked');
+      card.querySelector('.thumb').append(el('span', { className: 'series-order-badge', textContent: String(at + 1) }));
+      return;
+    }
     const at = picks.findIndex(p => p.f.id === f.id);
     if (at < 0) return;
     card.classList.add('merge-picked');
@@ -97,7 +128,13 @@ const MergeUI = (() => {
       document.body.append(top);
     }
     top.hidden = !active;
-    if (!active) { if (jobs.length) box.replaceChildren(jobsView()); return; }
+    if (!active) { if (jobs.length) box.replaceChildren(...['merge', 'auto'].map(jobsView).filter(Boolean)); return; }
+    const tabs = el('div', { className: 'merge-tabs' }, ...[['merge', '영상 합치기'], ['auto', '자동 썸네일']].map(([k, label]) => {
+      const b = el('button', { className: 'chip' + (tab === k ? ' on' : ''), textContent: label, onclick: () => setTab(k) });
+      b.setAttribute('aria-pressed', String(tab === k));
+      return b;
+    }));
+    if (tab === 'auto') return box.replaceChildren(tabs, ...autoPanel());
     const nameIn = el('input', { className: 'm-in', placeholder: '합친 영상 이름 (예: 겨울왕국 모음)', value: nameDraft,
       oninput: () => { nameDraft = nameIn.value; if (nameError) { nameError = ''; nameErr.remove(); } } });
     const nameErr = el('p', { className: 'hint error', textContent: nameError });
@@ -139,6 +176,7 @@ const MergeUI = (() => {
     const go = el('button', { className: 'primary m-big', textContent: unfinished().length ? `${picks.length}개 합치기 (작업 목록에 추가)` : `${picks.length}개 합치기`,
       disabled: picks.length < 2, onclick: start });
     box.replaceChildren(...[
+      tabs,
       el('div', { className: 'row' }, el('b', { textContent: '영상 합치기' }),
         el('span', { className: 'hint', textContent: '검색·필터로 영상을 찾고 썸네일을 누른 순서대로 담겨요. 다시 누르면 빠져요.' })),
       picks.length ? list : el('p', { className: 'hint', textContent: '아직 담은 영상이 없어요.' }),
@@ -147,7 +185,26 @@ const MergeUI = (() => {
       el('p', { className: 'hint', textContent: '합친 영상은 첫 영상이 있는 드라이브 폴더에 올라가고, 다 올라간 걸 확인한 뒤 원본은 드라이브 휴지통으로 옮겨져요(30일 안에 복원 가능). 해상도는 첫 영상에 맞추고, 합치는 동안 이 탭을 열어 두세요.' }),
       isPC() ? null : el('p', { className: 'hint error', textContent: '영상 합치기는 PC 크롬·엣지에서만 돼요.' }),
       el('div', { className: 'row' }, go, el('button', { textContent: '닫기', onclick: toggleMode })),
-      jobs.length ? jobsView() : null].filter(Boolean));
+      jobsView('merge')].filter(Boolean));
+  }
+  function autoPanel() {
+    const taken = reserved();
+    const ready = shown.filter(f => hasThumb(f) && !taken.has(f.id));
+    const picked = autoPicks.filter(f => !taken.has(f.id));
+    const go = el('button', { className: 'primary m-big', textContent: `${picked.length}개 자동 썸네일 넣기`, disabled: !picked.length, onclick: startAuto });
+    return [
+      el('div', { className: 'row' }, el('b', { textContent: '자동 썸네일' }),
+        el('span', { className: 'hint', textContent: '맨 앞 1초 썸네일을 아직 안 넣은 영상만 보여요. 썸네일을 누르면 골라지고, 다시 누르면 빠져요.' })),
+      el('p', { className: 'hint', textContent: '고른 영상마다 지정한 썸네일을 맨 앞 1초로 넣어 다시 압축한 뒤 같은 드라이브 파일에 덮어써요. 파일이 그대로라 이름·태그·시리즈 등은 그대로이고, 원본은 드라이브에 이전 버전으로 남아요. 다 올라가기 전에 취소·실패하면 원본은 바뀌지 않아요. 다른 탭에 가도 작업은 계속돼요(이 브라우저 탭은 열어 두세요). 흐린 영상은 지정 썸네일이 없어 고를 수 없어요.' }),
+      isPC() ? null : el('p', { className: 'hint error', textContent: '자동 썸네일은 PC 크롬·엣지에서만 돼요.' }),
+      el('div', { className: 'row' }, go,
+        el('button', { textContent: `보이는 영상 모두 고르기 (${ready.length})`, disabled: !ready.length, onclick: () => {
+          for (const f of ready) if (!autoPicks.some(x => x.id === f.id)) autoPicks.push(f);
+          renderGrid();
+        } }),
+        autoPicks.length ? el('button', { textContent: '고른 것 비우기', onclick: () => { autoPicks = []; renderGrid(); } }) : null,
+        el('button', { textContent: '닫기', onclick: toggleMode })),
+      jobsView('auto')].filter(Boolean);
   }
 
   // ---- 드라이브에서 조금씩 읽기 (로그인이 만료되면 다시 로그인할 때까지 기다렸다 이어서) ----
@@ -303,7 +360,7 @@ const MergeUI = (() => {
     try {
       for (let job; (job = jobs.find(j => j.state === 'waiting'));) {
         while (fixing) await sleep(1000);
-        if (job.state === 'waiting') await runJob(job);
+        if (job.state === 'waiting') await (job.kind === 'auto' ? runAuto(job) : runJob(job));
       }
     } finally { pumping = false; }
   }
@@ -319,7 +376,7 @@ const MergeUI = (() => {
     job.show = (pct, text) => {
       const state = job.state;
       if (pct !== undefined) bar.firstChild.style.width = pct.toFixed(1) + '%';
-      label.textContent = text !== undefined ? text : state === 'waiting' ? `차례를 기다리는 중 · 영상 ${job.list.length}개` : label.textContent;
+      label.textContent = text !== undefined ? text : state === 'waiting' ? (job.kind === 'auto' ? '차례를 기다리는 중' : `차례를 기다리는 중 · 영상 ${job.list.length}개`) : label.textContent;
       job.el.dataset.state = state;
       btn.textContent = state === 'waiting' || state === 'running' ? '취소' : '지우기';
       btn.onclick = () => {
@@ -330,8 +387,10 @@ const MergeUI = (() => {
     };
     job.show(0);
   }
-  function jobsView() {
-    return el('div', { className: 'm-sec merge-jobs' }, el('b', { textContent: '합치기 작업' }), ...jobs.map(j => j.el));
+  function jobsView(kind) {
+    const list = jobs.filter(j => (j.kind || 'merge') === kind);
+    if (!list.length) return null;
+    return el('div', { className: 'm-sec merge-jobs' }, el('b', { textContent: kind === 'auto' ? '자동 썸네일 작업' : '합치기 작업' }), ...list.map(j => j.el));
   }
 
   // ---- 합친 뒤 번호 다시 매기기 ----
@@ -453,6 +512,9 @@ const MergeUI = (() => {
       const marks = list.map(p => gallery.marks[p.f.id]);
       const mark = marks.includes('star') ? 'star' : marks.includes('square') ? 'square' : null;
       if (mark) { gallery.marks[made.id] = mark; pendingSaves.set('m:' + made.id, mark); }
+      // 맨 앞 1초 장면을 넣어 합쳤으면 합친 영상도 "넣음" (휴지통으로 간 원본 표시는 지움)
+      if (job.intro) { introMap()[made.id] = true; pendingSaves.set('i:' + made.id, true); }
+      for (const g of gone) if (introMap()[g.id]) { delete introMap()[g.id]; pendingSaves.set('i:' + g.id, null); }
       flushSaves();
       job.state = 'done';
       job.show(100, `만들었어요. 원본 ${trashed}/${list.length}개를 드라이브 휴지통으로 옮겼어요(30일 안에 복원 가능).`
@@ -463,6 +525,75 @@ const MergeUI = (() => {
       job.url = null;
       job.state = e.name === 'AbortError' ? 'canceled' : 'failed';
       job.show(undefined, e.name === 'AbortError' ? '취소했어요. 원본은 그대로예요.' : '합치지 못했어요: ' + e.message + ' (원본은 그대로예요)');
+    }
+    renderGrid();
+  }
+
+  // ---- 자동 썸네일: 고른 영상마다 작업 하나 (합치기와 같은 줄에서 차례로) ----
+  async function startAuto() {
+    const taken = reserved();
+    const list = autoPicks.filter(f => !taken.has(f.id) && hasThumb(f) && !introMap()[f.id]);
+    if (!list.length) return;
+    if (!isPC()) return setStatus('자동 썸네일은 PC 크롬·엣지에서만 돼요.', true);
+    if (list.some(f => !(+f.size > 0))) return setStatus('크기 정보가 없는 영상이 있어 처리할 수 없어요.', true);
+    if (!await ensureWriteScope()) return;
+    if (!swept) { swept = true; await sweepTemps(); }
+    for (const f of list) {
+      const job = { kind: 'auto', id: ++jobSeq + '-' + Date.now().toString(36), name: f.name, list: [{ f }], state: 'waiting', ctrl: new AbortController(), url: null };
+      jobView(job);
+      jobs.push(job);
+    }
+    autoPicks = [];
+    renderGrid();
+    setStatus(`영상 ${list.length}개를 자동 썸네일 작업 목록에 넣었어요.`);
+    pump();
+  }
+  // 지정 썸네일(같은 화면 출처라 캔버스에 그릴 수 있음) → 이미지
+  async function thumbImage(f) {
+    const c = gallery.videos[f.id];
+    const u = c.thumb || await thumbUrl(c.file);
+    const im = new Image();
+    await new Promise((ok, bad) => { im.onload = ok; im.onerror = () => bad(new Error('지정 썸네일을 불러오지 못했어요')); im.src = u; });
+    return im;
+  }
+  async function runAuto(job) {
+    const { f } = job.list[0], { signal } = job.ctrl;
+    job.state = 'running';
+    const onWait = on => { if (on) job.show(undefined, '로그인 시간이 끝나 기다리는 중 — 위쪽 🔑 다시 로그인을 누르면 이어서 해요'); };
+    job.show(0, '시작');
+    renderGrid();
+    try {
+      if (!hasThumb(f)) throw new Error('지정 썸네일이 없어요');
+      const img = await thumbImage(f);
+      const need = +f.size * 1.3;
+      const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
+      if (est && est.quota - est.usage < need) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(need / 1e9).toFixed(1)}GB)`);
+      // 진행률: 다시 압축 0~70%, 덮어 올리기 70~100%. 덮어쓰기는 마지막 조각이 올라가야 바뀌므로 그 전에 멈추면 원본 그대로
+      const made = await withTemp('auto-' + job.id + '.mp4', async tmp => {
+        await VideoMerge.merge({
+          parts: [{ name: f.name, size: +f.size, read: driveRead(f, signal, onWait), intro: img }],
+          writable: tmp.writable, signal,
+          onProgress: p => { const pct = Math.min(70, 70 * p.done / p.total); job.show(pct, `${pct.toFixed(0)}% · 맨 앞 1초 썸네일 넣고 다시 압축하는 중`); },
+        });
+        const blob = await tmp.file();
+        if (!(token && Date.now() < tokenExp)) await waitLogin(signal, onWait);
+        const m = await driveUpload({}, blob, n => { const pct = 70 + 30 * n / blob.size;
+          job.show(pct, `${pct.toFixed(0)}% · 드라이브에 덮어쓰는 중 ${(n / 1e6).toFixed(0)} / ${(blob.size / 1e6).toFixed(0)}MB`); }, signal, f.id, job);
+        if (!m || +m.size !== blob.size) throw new Error('드라이브에 다 올라갔는지 확인하지 못했어요.');
+        return m;
+      });
+      job.url = null;
+      Object.assign(f, { size: made.size, mimeType: made.mimeType || f.mimeType, videoMediaMetadata: made.videoMediaMetadata || f.videoMediaMetadata });
+      introMap()[f.id] = true;
+      pendingSaves.set('i:' + f.id, true);
+      flushSaves();
+      job.state = 'done';
+      job.show(100, '끝났어요. 맨 앞 1초 썸네일을 넣어 같은 파일에 덮어썼어요 (드라이브에 이전 버전이 남아요).');
+    } catch (e) {
+      if (job.url) fetch(job.url, { method: 'DELETE' }).catch(() => {}); // 올리다 만 건 버림 → 원본 그대로
+      job.url = null;
+      job.state = e.name === 'AbortError' ? 'canceled' : 'failed';
+      job.show(undefined, (e.name === 'AbortError' ? '취소했어요.' : '실패: ' + e.message) + ' 원본은 그대로예요.');
     }
     renderGrid();
   }
@@ -514,5 +645,5 @@ const MergeUI = (() => {
 
   // 모자이크 해제(decensor-ui.js)도 같은 드라이브 읽기·임시 파일·덮어 올리기를 씀
   const tools = { driveRead, withTemp, driveUpload, waitLogin };
-  return { tools, gapPlans, get lastGroups() { return lastGroups; }, renumber, get active() { return active; }, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
+  return { tools, gapPlans, get lastGroups() { return lastGroups; }, renumber, get active() { return active; }, get tab() { return tab; }, leave, filter, get busy() { return unfinished().length > 0 || !!fixing; }, jobs, toggleMode, toggle, decorate, panel, isPC, offerFix };
 })();

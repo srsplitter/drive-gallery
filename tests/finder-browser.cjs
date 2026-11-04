@@ -68,8 +68,9 @@ const video = `<ul>
       $('#setup').hidden = true; renderGrid();
     });
     const chips = await page.locator('#catbar .catscroll .chip').allTextContents();
-    assert.equal(chips.at(-1), '검색', '[검색] comes right after [모자이크]');
-    assert.equal(chips.at(-2), '모자이크');
+    assert.equal(chips.at(-1), '검색', '[검색] comes right after [편집] (수정 ON 에서만 보이는 탭)');
+    assert.equal(chips.at(-2), '편집');
+    assert.equal(chips.at(-3), '모자이크');
     await page.locator('#catbar').getByRole('button', { name: '검색', exact: true }).click();
     assert.equal(await page.locator('#finderView').count(), 1);
     assert.equal(await page.locator('#grid .card').count(), 0, 'the gallery videos are not shown on the search screen');

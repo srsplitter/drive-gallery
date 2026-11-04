@@ -290,7 +290,7 @@
   @media (max-width: 520px) { #directoryMemos { grid-template-columns: 1fr; } }
   #directoryMemos[hidden], #bulkTag[hidden], #dirFocus[hidden], #mergePanel[hidden] { display: none; }
   /* 영상 합치기 */
-  @media (max-width: 520px), (pointer: coarse) { #mergeBtn { display: none !important; } } /* PC 전용 */
+  @media (max-width: 520px), (pointer: coarse) { .merge-tab { display: none !important; } } /* PC 전용 */
   #mergePanel { display: grid; gap: 12px; margin-bottom: 20px; padding: 14px; border: 1px solid var(--accent); border-radius: 12px; background: var(--panel); }
   .merge-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
   .merge-item { display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-width: 0; }
@@ -313,6 +313,10 @@
   .merge-job[data-state="done"] { border-color: #57b878; }
   .merge-job[data-state="failed"] { border-color: var(--danger); }
   .merge-job[data-state="canceled"] { opacity: .6; }
+  /* 맨 앞 1초 썸네일을 아직 안 넣은 영상: 이름 칸 빗금 */
+  .card.no-intro > .name:not(.dur-line) { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.09) 0 5px, transparent 5px 10px); }
+  .card.auto-nothumb { opacity: .35; } /* 자동 썸네일: 지정 썸네일이 없어 고를 수 없음 */
+  .merge-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   .card.merge-reserved { opacity: .35; } /* 이미 다른 합치기 작업에 들어간 영상 */
   .merge-intro-now { width: 160px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; border: 2px solid var(--accent); }
   /* 편집 중: 화면 아래 가운데 맨 위로 (네모 버튼) */
@@ -501,7 +505,6 @@
 <body>
 <header>
   <h1><button id="siteLogo" type="button" aria-label="홈페이지 아이콘 변경" title="아이콘 이미지 선택"><span id="brandIcon"><img src="icons/gallery-192.png?v=20261021" alt=""></span><span>갤러리</span></button><span id="appVersion" title="사이트 버전">v1.0.0.1</span></h1>
-  <button id="mergeBtn" class="edit-only" type="button" title="영상 합치기">편집</button>
   <input id="brandFile" type="file" accept="image/*" hidden>
   <div id="crumbs"></div>
   <span id="saveState"></span>
@@ -571,7 +574,7 @@
 <script src="directory-thumbs.js?v=20261105-plain1"></script>
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
-<script src="merge-ui.js?v=20261101-range1"></script>
+<script src="merge-ui.js?v=20261105-auto1"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
 <script src="finder-ui.js?v=20261101-find5"></script>
 <script src="site-ui.js?v=20261105-site2"></script>
@@ -785,7 +788,7 @@ async function api(url, opts = {}) {
 // 지정 썸네일 이미지는 같은 앱 폴더에 영상마다 따로 둔 작은 jpg 파일(thumb-영상ID.jpg), gallery.json 엔 그 파일 ID(file)만.
 // 화면에서 막 정한 썸네일은 저장 전까지 thumb(이미지 data URL)로 들고 있다가 저장할 때 파일로 올림.
 // (예전엔 이미지를 thumb 로 gallery.json 안에 통째로 넣었음 → 불러올 때 찾아서 파일로 옮김: migrateQueue)
-let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {}, knownTags: {}, siteUrls: {} }, galleryFileId = null;
+let gallery = { videos: {}, hidden: {}, tags: {}, fav: {}, hiddenCats: {}, exUse: {}, loved: {}, tagKinds: {}, marks: {}, series: {}, order: {}, covers: {}, settings: {}, knownTags: {}, siteUrls: {}, intro: {} }, galleryFileId = null;
 // 아직 드라이브에 못 쓴 변경 (영상 ID → 새 썸네일 항목/null, 'h:'+영상 ID → 숨김 true/null,
 // 't:'+영상 ID → 태그 배열/null, 'f:'+태그 → 즐겨찾기 true/null). 화면에는 이미 반영돼 있다.
 const pendingSaves = new Map();
@@ -877,11 +880,11 @@ async function readRemote() {
       cachePut(files[0].md5Checksum, data);
     }
   }
-  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings', 'knownTags', 'siteUrls']) data[k] = data[k] || {};
+  for (const k of ['videos', 'hidden', 'tags', 'fav', 'hiddenCats', 'exUse', 'loved', 'tagKinds', 'marks', 'series', 'order', 'covers', 'settings', 'knownTags', 'siteUrls', 'intro']) data[k] = data[k] || {};
   return { fileId: files.length ? files[0].id : null, data };
 }
 
-const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings', 'n:': 'knownTags', 'w:': 'siteUrls' }; // w: 사이트 태그 → 그 사이트 주소
+const CHANGE_MAPS = { 'h:': 'hidden', 't:': 'tags', 'f:': 'fav', 'c:': 'hiddenCats', 'x:': 'exUse', 'l:': 'loved', 'k:': 'tagKinds', 'm:': 'marks', 's:': 'series', 'o:': 'order', 'p:': 'covers', 'u:': 'settings', 'n:': 'knownTags', 'w:': 'siteUrls', 'i:': 'intro' }; // w: 사이트 태그 → 그 사이트 주소, i: 맨 앞 1초 썸네일을 넣은 영상
 function applyChanges(data, changes) {
   for (const [key, val] of changes) {
     const m = CHANGE_MAPS[key.slice(0, 2)];
@@ -1401,7 +1404,6 @@ function toast(text, sticky) {
   clearTimeout(toastTimer);
   if (!sticky) toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
 }
-$('#mergeBtn').onclick = () => MergeUI.toggleMode();
 $('#topBtn').onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
 
 function renderMenu() {
@@ -1642,6 +1644,7 @@ function renderGrid() {
   shown = window.GallerySeries.arrange(shown, gallery.series);
   if (currentView === 'title') shown = TitleEditor.filter(shown);
   if (currentView === 'mosaic') shown = DecensorUI.filter(shown);
+  shown = MergeUI.filter(shown); // 편집 · 자동 썸네일: 이미 넣은 영상은 뺌
   $('#bulkTag').hidden = !!currentView;
   $('#directoryMemos').hidden = !currentView || currentView === 'series' || currentView === 'title' || currentView === 'mosaic' || currentView === 'finder';
   renderBulk();
@@ -1669,7 +1672,6 @@ function renderGrid() {
   }
   renderDirFocus();
   MergeUI.panel();
-  $('#mergeBtn').classList.toggle('primary', MergeUI.active);
   $('#topBtn').hidden = MergeUI.active || !token; // 편집 중엔 가운데 네모 버튼
   // [복원]: 가장 최근 작업(태그·이름 바꾸기 등)을 반대로 되돌림. 누를 때마다 한 작업씩 더 앞으로
   const lastUndo = undoStack[undoStack.length - 1];
@@ -1706,13 +1708,24 @@ function directoryTabs() {
         if (searchOpen) query = $('#catbar').querySelector('.search').value.trim().toLowerCase();
         clearTimeout(searchTimer);
         SeriesUI.cancel();
+        MergeUI.leave(); // 다른 탭으로 가면 편집 화면만 닫힘 (작업은 계속)
         currentView = currentView === kind ? '' : kind;
         renderGrid();
       }
     });
     b.setAttribute('aria-pressed', String(currentView === kind));
     return b;
-  });
+  }).flatMap(b => b.textContent === '모자이크' ? [b, editTab()] : [b]);
+}
+// [편집] 탭 (수정 ON, PC): 모든 영상 위에 편집 화면(영상 합치기 / 자동 썸네일). 다시 누르면 닫힘
+function editTab() {
+  const b = el('button', { className: 'chip edit-only merge-tab' + (MergeUI.active ? ' on' : ''), textContent: '편집', title: '영상 편집 (합치기 · 자동 썸네일)',
+    onclick: () => {
+      if (!MergeUI.active) { clearTimeout(searchTimer); SeriesUI.cancel(); currentView = ''; }
+      MergeUI.toggleMode();
+    } });
+  b.setAttribute('aria-pressed', String(MergeUI.active));
+  return b;
 }
 function renderCatbar() {
   const bar = $('#catbar');
@@ -1915,6 +1928,7 @@ function videoCard(f, counts = tagCounts()) {
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
   if (gallery.marks[f.id]) card.classList.add('mark-' + gallery.marks[f.id]);
+  if (!(gallery.intro || {})[f.id]) card.classList.add('no-intro'); // 맨 앞 1초 썸네일을 아직 안 넣음 → 이름 칸 빗금
   if (isLoved(f)) { card.classList.add('loved'); thumb.append(heartSvg(true, 'love-badge')); }
   SeriesUI.decorate(card, f);
   MergeUI.decorate(card, f);
@@ -2257,6 +2271,7 @@ async function trashVideo(f) {
   setStatus(`"${f.name}"을(를) 휴지통으로 옮기는 중…`);
   try {
     await api(`${DRIVE}/files/${f.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+    if ((gallery.intro || {})[f.id]) { delete gallery.intro[f.id]; pendingSaves.set('i:' + f.id, null); }
     if (gallery.videos[f.id]) saveEntry(f.id, null); // 지정해 둔 썸네일도 정리
     setStatus(`"${f.name}"을(를) 드라이브 휴지통으로 옮겼어요. (30일 안에 드라이브 휴지통에서 복원 가능)`);
   } catch (e) {
