@@ -1,4 +1,4 @@
-// [사이트] 탭(파란 사이트 태그, 태그↔사이트 이동, 줄마다 사이트 주소, 줄을 누르면 그 영상) + 카드 태그 줄에서 바로 태그 추가.
+// [사이트] 탭(파란 사이트 태그, 태그↔사이트 이동, 줄마다 대표 썸네일·사이트 주소, 줄을 누르면 그 줄 아래에 영상) + 카드 태그 줄에서 바로 태그 추가.
 // 독립 브라우저와 가짜 갤러리 데이터로 확인. 실제 구글 계정에는 접근하지 않는다.
 const { chromium } = require('C:/Users/admin/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const fs = require('node:fs');
@@ -48,32 +48,57 @@ const root = path.resolve(__dirname, '..');
     await toSite.locator('textarea').press('Enter');
     assert.equal(await page.evaluate(() => gallery.tagKinds.pornhub), 'site');
     assert.equal((await changes())['k:pornhub'], 'site');
-    // 4) [사이트] 목록: 한 줄씩, 막 넘어온 pornhub 는 주소 칸이 빈칸, 메모는 "태그(으)로 이동" 하나
+    // 4) [사이트] 목록: 한 줄씩, 메모는 "태그(으)로 이동" 하나. 수정 ON 에서는 주소 칸이 없고 주소가 있으면 이름이 링크
     await page.locator('#catbar').getByRole('button', { name: '사이트', exact: true }).click();
     assert.deepEqual(await page.locator('.site-row').evaluateAll(ns => ns.map(n => n.dataset.tag)), ['missav', 'pornhub']);
     assert.deepEqual(await page.locator('#directoryMemos .m-sec > b').allTextContents(), ['태그(으)로 이동']);
-    const slot = page.locator('.site-row[data-tag="pornhub"] .site-link');
+    assert.equal(await page.locator('.site-row .site-link').count(), 0, 'edit ON hides the address slot');
+    const missavName = page.locator('.site-row[data-tag="missav"] a.site-name');
+    assert.equal(await missavName.getAttribute('href'), 'https://missav.ws/');
+    assert.equal(await missavName.getAttribute('target'), '_blank');
+    assert.equal(await page.locator('.site-row[data-tag="pornhub"] a.site-name').count(), 0, 'no address → the name is plain text');
+    assert.equal(await page.locator('.site-row[data-tag="missav"] .cover-thumb').count(), 1, 'rows show a cover thumbnail');
+    // 5) 수정 ON: 이름 말고 칸을 누르면 그 줄 바로 아래에 대표 썸네일 고르기 + 주소 칸 + 그 영상
+    await page.locator('.site-row[data-tag="missav"] .cnt').click();
+    const order = () => page.locator('#siteList > *').evaluateAll(ns => ns.map(n => n.dataset.coverKey || n.className));
+    assert.deepEqual(await order(), ['tag:missav', 'site-videos', 'tag:pornhub'], 'videos sit right under their row');
+    assert.equal(await page.locator('.site-videos h2').textContent(), 'missav (1)');
+    await page.locator('.site-row[data-tag="pornhub"] b').click();
+    assert.deepEqual(await order(), ['tag:missav', 'tag:pornhub', 'site-videos']);
+    assert.deepEqual((await page.locator('.site-videos .card').evaluateAll(ns => ns.map(n => n.dataset.id))).sort(), ['a', 'b']);
+    const picks = page.locator('.directory-item[data-cover-key="tag:pornhub"] .cover-candidate');
+    assert.equal(await picks.count(), 2);
+    await page.locator('.directory-item[data-cover-key="tag:pornhub"] .cover-candidate[data-video-id="b"]').click();
+    assert.equal(await page.evaluate(() => gallery.covers['tag:pornhub']), 'b');
+    assert.equal((await changes())['p:tag:pornhub'], 'b');
+    const slot = page.locator('.site-url-edit .site-link');
     assert.equal(await slot.textContent(), '', 'a site just moved from tags has an empty address slot');
-    assert.match(await page.locator('.site-row[data-tag="missav"] .site-link').textContent(), /missav\.ws/);
-    // 5) 수정 ON: 주소 칸을 누르면 그 자리에서 주소 고치기 (https:// 없으면 붙임, 줄은 안 열림)
     await slot.click();
     await page.locator('.site-url-in').fill('pornhub.com');
     await page.locator('.site-url-in').press('Enter');
     assert.equal(await page.evaluate(() => gallery.siteUrls.pornhub), 'https://pornhub.com/');
     assert.equal((await changes())['w:pornhub'], 'https://pornhub.com/');
-    assert.equal(await page.locator('#siteView h2').count(), 0, 'editing the address does not open the row');
-    await page.locator('.site-row[data-tag="pornhub"] .site-link').click();
+    assert.equal(await page.locator('.site-row[data-tag="pornhub"] a.site-name').getAttribute('href'), 'https://pornhub.com/');
+    await page.locator('.site-url-edit .site-link').click();
     await page.locator('.site-url-in').fill('javascript:alert(1)');
     await page.locator('.site-url-in').press('Enter');
     assert.equal(await page.locator('.site-url-in').count(), 1, 'a non-http address is not saved');
     await page.locator('.site-url-in').press('Escape');
     assert.equal(await page.evaluate(() => gallery.siteUrls.pornhub), 'https://pornhub.com/');
-    // 6) 수정 OFF: 주소 칸은 새 탭으로 여는 링크
+    await page.screenshot({ path: path.join(root, 'tests', 'site-edit.png'), fullPage: true });
+    await page.locator('.site-row[data-tag="pornhub"] .cnt').click();
+    assert.equal(await page.locator('.site-videos').count(), 0, 'clicking again closes it');
+    // 6) 수정 OFF: 이름은 글자, 주소 칸은 새 탭으로 여는 링크
     await page.evaluate(() => setEditMode(false));
     const link = page.locator('.site-row[data-tag="pornhub"] a.site-link');
     assert.equal(await link.getAttribute('href'), 'https://pornhub.com/');
     assert.equal(await link.getAttribute('target'), '_blank');
-    // 7) 주소 칸 말고 줄을 누르면 목록 아래에 그 태그의 영상, 다시 누르면 닫힘
+    assert.equal(await page.locator('a.site-name').count(), 0);
+    // 7) 주소 칸 말고 줄을 누르면 그 줄 바로 아래에 그 태그의 영상, 다시 누르면 닫힘
+    await page.locator('.site-row[data-tag="missav"] .site-main').click();
+    assert.deepEqual(await order(), ['tag:missav', 'site-videos', 'tag:pornhub']);
+    assert.equal(await page.locator('#siteView h2').textContent(), 'missav (1)');
+    await page.locator('.site-row[data-tag="missav"] .site-main').click();
     await page.locator('.site-row[data-tag="pornhub"] .site-main').click();
     assert.equal(await page.locator('#siteView h2').textContent(), 'pornhub (2)');
     assert.deepEqual((await page.locator('#siteView .card').evaluateAll(ns => ns.map(n => n.dataset.id))).sort(), ['a', 'b']);

@@ -64,12 +64,13 @@ const DirectoryThumbs = (() => {
     } else wrap.append(icon());
     return wrap;
   }
-  function item(key, button, videoList) {
+  // plain: 버튼 글자를 그대로 둠 ([사이트] 줄처럼 이름·주소를 따로 그리는 곳)
+  function item(key, button, videoList, { plain = false } = {}) {
     const candidates = ordered(videoList), coverId = (gallery.covers || {})[key];
     const cover = candidates.find(f => f.id === coverId) || candidates[0];
     const wrap = el('div', { className: 'directory-item' });
     wrap.dataset.coverKey = key;
-    if (key.startsWith('tag:')) {
+    if (key.startsWith('tag:') && !plain) {
       const name = key.slice(4);
       for (const node of [...button.childNodes]) {
         if (node.nodeType === 3 && node.textContent === name) node.replaceWith(el('span', { className: 'directory-name', textContent: name, title: name }));

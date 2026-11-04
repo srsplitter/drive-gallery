@@ -249,9 +249,15 @@
   .series-open { flex: 1; text-align: left; min-width: 140px; }
   .series-playlist-title { font-size: 16px; margin: 18px 0 12px; }
   /* [사이트] 탭: 시리즈처럼 한 줄씩, 이름 아래에 사이트로 가는 칸 (주소 없으면 빈칸). 누른 줄은 파란 테두리 */
-  .site-row { display: grid; gap: 6px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-left: 3px solid #4c8dff; border-radius: 10px; cursor: pointer; }
+  .site-row { display: flex; align-items: center; gap: 10px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-left: 3px solid #4c8dff; border-radius: 10px; cursor: pointer; }
   .site-row:hover { border-color: var(--dim); border-left-color: #4c8dff; }
   .site-row.active { border-color: #4c8dff; }
+  .site-body { display: grid; gap: 6px; flex: 1; min-width: 0; }
+  .site-row > .cover-thumb { margin: 0 4px; }
+  a.site-name { font-weight: 700; color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+  a.site-name:hover { text-decoration: underline; }
+  .site-url-edit { display: flex; align-items: center; gap: 8px; margin: -2px 0 10px; padding: 0 12px; }
+  .site-url-edit .site-link, .site-url-edit .site-url-in { flex: 1; min-width: 0; }
   .site-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .site-main b { overflow-wrap: anywhere; }
   .site-main .cnt { color: var(--dim); font-size: 13px; }
@@ -261,7 +267,8 @@
   .site-link.empty { color: var(--dim); }
   body.editing .site-link.empty { border-style: dashed; }
   .site-url-in { justify-self: stretch; padding: 5px 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
-  #siteView > .site-library > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600; margin: 22px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  .site-videos { margin-bottom: 18px; }
+  .site-videos > h2.section-title { font-size: 16px; color: var(--dim); font-weight: 600; margin: 22px 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
   .series-reorder-item { min-width: 0; cursor: grab; }
   .series-reorder-item .card { height: 100%; cursor: grab; }
   #seriesEditor .row { margin-top: 14px; }
@@ -467,7 +474,7 @@
   .series-row > .cover-thumb { margin: 0 8px; }
   @media (min-width: 521px) and (pointer: fine) {
     .series-row { padding: 24px 12px; }
-    .series-row > .cover-thumb, .series-open > .cover-thumb { width: 160px; }
+    .series-row > .cover-thumb, .series-open > .cover-thumb, .site-row > .cover-thumb { width: 160px; }
   }
   .title-memos { margin-bottom: 20px; }
   .title-memos textarea { min-height: 94px; resize: vertical; border: 1px solid var(--line); border-radius: 12px; padding: 10px; background: var(--bg); color: var(--text); font: inherit; }
@@ -561,13 +568,13 @@
 <script src="series.js?v=20261017-renum4"></script>
 <script src="series-ui.js?v=20261017-renum4"></script>
 <script src="title-editor.js?v=20261017-renum4"></script>
-<script src="directory-thumbs.js?v=20261017-renum4"></script>
+<script src="directory-thumbs.js?v=20261105-plain1"></script>
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
 <script src="merge-ui.js?v=20261101-range1"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
 <script src="finder-ui.js?v=20261101-find5"></script>
-<script src="site-ui.js?v=20261101-site1"></script>
+<script src="site-ui.js?v=20261105-site2"></script>
 <script>
 // Google Cloud에서 발급한 OAuth 클라이언트 ID (공개값, 비밀 아님). 비어 있으면 첫 화면에서 입력받는다.
 const CLIENT_ID = '';
