@@ -628,7 +628,7 @@ function requestToken(extraScope) {
       sessionStorage.setItem('tok', JSON.stringify({ token, tokenExp, tokenScopes }));
       resolve();
     };
-    tokenClient.error_callback = e => reject(new Error(e.message || e.type));
+    tokenClient.error_callback = e => reject(Object.assign(new Error(e.message || e.type), { type: e.type }));
     tokenClient.requestAccessToken(extraScope ? { prompt: '', scope: SCOPES + ' ' + extraScope } : { prompt: '' });
   });
 }
@@ -665,6 +665,10 @@ async function relogin() {
   try {
     await requestToken(hasScope(SCOPE_WRITE) ? SCOPE_WRITE : undefined); // 받아 둔 수정 권한도 유지
   } catch (e) { return setStatus('로그인 실패: ' + e.message, true); }
+  resumeAfterLogin();
+}
+// auto: 작업 중 저절로 연장된 경우 → 화면은 움직이지 않음
+function resumeAfterLogin(auto) {
   const b = $('#authBtn');
   delete b.dataset.expired;
   b.textContent = '로그아웃';
@@ -675,7 +679,7 @@ async function relogin() {
   flushSaves();
   prefetchCandidates();
   runCandJobs();
-  if (!viewer.open) scrollToNextTodo(); // 다시 로그인하면 썸네일 안 정한 첫 영상으로
+  if (!auto && !viewer.open) scrollToNextTodo(); // 다시 로그인하면 썸네일 안 정한 첫 영상으로
 }
 
 // 만료 10분 전부터는 사이트를 클릭할 때 로그인을 미리 연장 (이미 허용한 거라 구글 창이 잠깐 떴다 닫힘)
@@ -685,8 +689,26 @@ document.addEventListener('pointerdown', () => {
   renewing = true;
   requestToken(hasScope(SCOPE_WRITE) ? SCOPE_WRITE : undefined).catch(() => {}).finally(() => { renewing = false; });
 }, true);
+// 합치기·자동 썸네일·모자이크 작업 중에는 클릭이 없어도 만료 5분 전(이미 만료됐으면 바로) 저절로 연장.
+// 클릭 없이 여는 구글 창은 브라우저가 팝업으로 막을 수 있어, 막히면 "팝업 항상 허용" 안내를 띄움 (허용해 두면 다음부턴 저절로)
+const workBusy = () => MergeUI.busy || DecensorUI.reservedIds().size > 0;
+let autoRenewAt = 0;
+async function autoRenew() {
+  const expired = !!$('#authBtn').dataset.expired;
+  if (!token || renewing || !workBusy() || Date.now() < autoRenewAt) return;
+  if (!expired && tokenExp - Date.now() > 5 * 60 * 1000) return;
+  renewing = true;
+  autoRenewAt = Date.now() + 60 * 1000; // 실패하면 1분 뒤 다시
+  try {
+    await Promise.race([requestToken(hasScope(SCOPE_WRITE) ? SCOPE_WRITE : undefined),
+      new Promise((_, no) => setTimeout(() => no(new Error('시간 초과')), 2 * 60 * 1000))]);
+    if ($('#authBtn').dataset.expired) resumeAfterLogin(true);
+  } catch (e) {
+    if (e.type === 'popup_failed_to_open') setStatus('작업 중이라 로그인을 저절로 연장하려 했는데 브라우저가 구글 창(팝업)을 막았어요. 주소창 오른쪽 팝업 차단 아이콘 → "항상 허용"을 해 두면 다음부터 저절로 이어져요. 지금은 🔑 다시 로그인을 눌러 주세요.', true);
+  } finally { renewing = false; }
+}
 // 클릭이 없어도 만료되면 바로 버튼을 바꿔 둠
-setInterval(() => { if (token && Date.now() > tokenExp) markExpired(); }, 30000);
+setInterval(() => { if (token && Date.now() > tokenExp) markExpired(); autoRenew(); }, 30000);
 
 function showLoggedOut(msg) {
   SeriesUI.leave();
