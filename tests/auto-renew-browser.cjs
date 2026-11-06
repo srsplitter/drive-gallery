@@ -23,8 +23,8 @@ const root = path.resolve(__dirname, '..');
     await page.evaluate(() => {
       // 가짜 구글 토큰 창: window.popup = 'ok' 이면 새 토큰, 'blocked' 이면 팝업 막힘
       window.asked = 0; window.popup = 'ok';
-      tokenClient = { requestAccessToken() {
-        window.asked++;
+      tokenClient = { requestAccessToken(opts) {
+        window.asked++; window.lastOpts = opts;
         if (window.popup === 'blocked') return tokenClient.error_callback({ type: 'popup_failed_to_open', message: 'Failed to open popup window' });
         tokenClient.callback({ access_token: 'new' + window.asked, expires_in: 3600, scope: SCOPE_WRITE });
       } };
@@ -33,6 +33,13 @@ const root = path.resolve(__dirname, '..');
       flushSaves = () => {}; prefetchCandidates = () => {}; runCandJobs = () => {};
       window.scrolled = 0; scrollToNextTodo = () => window.scrolled++;
     });
+    // 0) 로그인하면 드라이브에서 계정 이메일을 한 번 받아 두고, 연장할 때 구글 창에 login_hint 로 넘김 (계정 고르기 없이 닫히게)
+    await page.evaluate(async () => {
+      api = async url => { window.aboutUrl = url; return new Response(JSON.stringify({ user: { emailAddress: 'me@example.com' } })); };
+      loadAccount(); await new Promise(r => setTimeout(r, 50));
+    });
+    assert.match(await page.evaluate(() => window.aboutUrl), /\/about\?fields=user\(emailAddress\)/);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem('acct')), 'me@example.com');
     const state = () => page.evaluate(() => ({ asked: window.asked, token, expired: !!$('#authBtn').dataset.expired, status: $('#status').textContent, scrolled: window.scrolled }));
     // 1) 작업이 없으면 만료 3분 전이어도 저절로 연장하지 않음 (평소처럼 클릭할 때만)
     await page.evaluate(async () => { tokenExp = Date.now() + 3 * 60000; await autoRenew(); });
@@ -45,6 +52,7 @@ const root = path.resolve(__dirname, '..');
     let s = await state();
     assert.equal(s.asked, 1); assert.equal(s.token, 'new1'); assert.equal(s.expired, false);
     assert.ok(await page.evaluate(() => tokenExp - Date.now() > 50 * 60000));
+    assert.ok(await page.evaluate(() => window.lastOpts.prompt === '' && window.lastOpts.login_hint === 'me@example.com' && window.lastOpts.scope.includes(SCOPE_WRITE)));
     // 4) 이미 만료돼 🔑 다시 로그인 상태 → 저절로 다시 로그인하고 버튼도 되돌림, 화면은 안 움직임
     await page.evaluate(async () => { autoRenewAt = 0; tokenExp = Date.now() - 1000; markExpired(); await autoRenew(); });
     s = await state();

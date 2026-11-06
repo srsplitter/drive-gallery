@@ -629,8 +629,21 @@ function requestToken(extraScope) {
       resolve();
     };
     tokenClient.error_callback = e => reject(Object.assign(new Error(e.message || e.type), { type: e.type }));
-    tokenClient.requestAccessToken(extraScope ? { prompt: '', scope: SCOPES + ' ' + extraScope } : { prompt: '' });
+    const opts = { prompt: '' };
+    if (extraScope) opts.scope = SCOPES + ' ' + extraScope;
+    if (acctEmail) opts.login_hint = acctEmail; // 로그인한 계정을 알려 주면 구글 창이 계정 고르기 없이 저절로 닫힘
+    tokenClient.requestAccessToken(opts);
   });
+}
+
+// 로그인한 구글 계정(이메일). 연장할 때 구글 창에 알려 주는 용도로만 씀, 이 탭에만 둠
+let acctEmail = sessionStorage.getItem('acct') || '';
+function loadAccount() {
+  if (acctEmail) return;
+  api(`${DRIVE}/about?fields=user(emailAddress)`).then(r => r.json()).then(j => {
+    const email = j.user && j.user.emailAddress;
+    if (email && token) { acctEmail = email; sessionStorage.setItem('acct', email); }
+  }).catch(() => {});
 }
 
 function hasScope(scope) { return tokenScopes.split(' ').includes(scope); }
@@ -718,6 +731,8 @@ function showLoggedOut(msg) {
   $('#authBtn').className = '';
   $('#authBtn').textContent = '로그아웃';
   sessionStorage.removeItem('tok');
+  acctEmail = '';
+  sessionStorage.removeItem('acct');
   caches.delete(GCACHE).catch(() => {}); // 이 브라우저에 둔 gallery.json 사본도 지움
   caches.delete(TCACHE).catch(() => {}); // 받아 둔 썸네일 이미지도
   thumbUrls.clear();
@@ -3398,6 +3413,7 @@ async function start() {
   renderEditBtn();
   renderCatbar();
   setStatus('불러오는 중…');
+  loadAccount();
   try {
     // 목록과 gallery.json 을 동시에 받음 (전에는 gallery.json 을 다 받은 뒤에야 목록을 시작)
     const galleryLoading = loadGallery().then(() => flushSaves()); // 로그인이 만료돼 멈췄던 저장이 있으면 이어서
