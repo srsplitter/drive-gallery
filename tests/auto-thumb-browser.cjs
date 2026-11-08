@@ -30,6 +30,7 @@ const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
     await page.goto('https://gallery.test/');
     await page.evaluate(PNG => {
       prefetchCandidates = () => {}; needsShare = () => false; ensureWriteScope = async () => true;
+      IntroCheck.done = f => !!gallery.intro[f.id]; IntroCheck.want = () => {}; IntroCheck.processing = () => false; // 드라이브 썸네일 비교는 intro-check-browser 에서 확인
       token = 'fixture'; tokenExp = Date.now() + 3600000;
       window.savedChanges = [];
       flushSaves = async () => { window.savedChanges.push(...pendingSaves); pendingSaves.clear(); };

@@ -36,7 +36,7 @@ const MergeUI = (() => {
   function leave() { active = false; }
   function setTab(t) { tab = t; renderGrid(); }
   // 자동 썸네일 탭에서는 이미 1초 썸네일을 넣은 영상을 목록에서 뺌
-  const filter = list => active && tab === 'auto' ? list.filter(f => !introMap()[f.id]) : list;
+  const filter = list => active && tab === 'auto' ? list.filter(f => !IntroCheck.done(f) && !IntroCheck.processing(f)) : list;
   function autoToggle(f) {
     const at = autoPicks.findIndex(x => x.id === f.id);
     if (at >= 0) { autoPicks.splice(at, 1); return renderGrid(); }
@@ -532,7 +532,7 @@ const MergeUI = (() => {
   // ---- 자동 썸네일: 고른 영상마다 작업 하나 (합치기와 같은 줄에서 차례로) ----
   async function startAuto() {
     const taken = reserved();
-    const list = autoPicks.filter(f => !taken.has(f.id) && hasThumb(f) && !introMap()[f.id]);
+    const list = autoPicks.filter(f => !taken.has(f.id) && hasThumb(f) && !IntroCheck.done(f) && !IntroCheck.processing(f));
     if (!list.length) return;
     if (!isPC()) return setStatus('자동 썸네일은 PC 크롬·엣지에서만 돼요.', true);
     if (list.some(f => !(+f.size > 0))) return setStatus('크기 정보가 없는 영상이 있어 처리할 수 없어요.', true);
@@ -585,6 +585,7 @@ const MergeUI = (() => {
       job.url = null;
       Object.assign(f, { size: made.size, mimeType: made.mimeType || f.mimeType, videoMediaMetadata: made.videoMediaMetadata || f.videoMediaMetadata });
       introMap()[f.id] = true;
+      IntroCheck.uploaded(f);
       pendingSaves.set('i:' + f.id, true);
       flushSaves();
       job.state = 'done';

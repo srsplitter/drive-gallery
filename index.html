@@ -574,7 +574,8 @@
 <script src="directory-thumbs.js?v=20261105-plain1"></script>
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
-<script src="merge-ui.js?v=20261105-auto1"></script>
+<script src="intro-check.js?v=20261109-check2"></script>
+<script src="merge-ui.js?v=20261109-check2"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
 <script src="finder-ui.js?v=20261101-find5"></script>
 <script src="site-ui.js?v=20261105-site2"></script>
@@ -1575,7 +1576,7 @@ function shuffleShown() {
 
 async function listAllVideos() {
   const q = "mimeType contains 'video/' and trashed = false and 'me' in owners";
-  const fields = 'nextPageToken,files(id,name,mimeType,thumbnailLink,size,parents,videoMediaMetadata(durationMillis))';
+  const fields = 'nextPageToken,files(id,name,mimeType,thumbnailLink,thumbnailVersion,size,parents,videoMediaMetadata(durationMillis))';
   const out = [];
   let pageToken = '';
   do {
@@ -1631,6 +1632,7 @@ async function refreshList() {
       if (f.name !== v.name) changed = true;
       return Object.assign(f, v);
     });
+    IntroCheck.recheck(); // 드라이브 썸네일이 새로 만들어졌으면 다시 비교
     if (!changed) return;
     items = next;
     renderGrid();
@@ -1965,7 +1967,7 @@ function videoCard(f, counts = tagCounts()) {
   card.dataset.id = f.id;
   if (isHidden(f)) { card.classList.add('is-hidden'); thumb.append(el('span', { className: 'badge hid', textContent: '🙈 숨김' })); }
   if (gallery.marks[f.id]) card.classList.add('mark-' + gallery.marks[f.id]);
-  if (!(gallery.intro || {})[f.id]) card.classList.add('no-intro'); // 맨 앞 1초 썸네일을 아직 안 넣음 → 이름 칸 빗금
+  if (!IntroCheck.done(f)) { card.classList.add('no-intro'); IntroCheck.want(f); } // 1초 썸네일을 안 넣었거나 드라이브 썸네일과 같은지 확인 안 됨 → 이름 칸 빗금
   if (isLoved(f)) { card.classList.add('loved'); thumb.append(heartSvg(true, 'love-badge')); }
   SeriesUI.decorate(card, f);
   MergeUI.decorate(card, f);
