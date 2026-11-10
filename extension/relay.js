@@ -2,7 +2,21 @@
 // - capture: 플레이어 프레임들의 컨트롤 등을 잠깐 숨기고 탭 화면을 찍어 돌려준다 (공유 허용 창 없음)
 // - player : 보고 있는 플레이어의 영상에 재생/멈춤·시간 이동을 적용한다
 // - bg     : 화면 밖에 숨겨 둔 플레이어(주소에 dgbg=1)로 대표 장면을 뽑는다 (파일에서 직접 못 뽑는 영상용)
+// - thumb  : 드라이브 썸네일 그림(lh3.googleusercontent.com 만)을 받아 data URL 로 돌려준다 (페이지는 CORS 때문에 그 그림의 픽셀을 못 읽음)
 // 드라이브 플레이어가 어떤 주소의 하위 프레임에서 영상을 재생하든 찾도록, 프레임마다 직접 실행한다.
+async function thumb(url) {
+  const u = new URL(url);
+  if (u.protocol !== 'https:' || u.hostname !== 'lh3.googleusercontent.com') throw new Error('드라이브 썸네일 주소가 아니에요');
+  const r = await fetch(u.href, { credentials: 'include' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const b = await r.blob();
+  if (!b.type.startsWith('image/') || b.size > 2e6) throw new Error('그림이 아니에요');
+  const bytes = new Uint8Array(await b.arrayBuffer());
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return { ok: true, data: 'data:' + b.type + ';base64,' + btoa(s) };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const tab = sender.tab;
   if (!tab) return;
@@ -27,6 +41,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'capture') { run(capture(tab), '캡처 실패'); return true; }
   if (msg.type === 'player') { run(player(tab, msg.action, msg.delta), '플레이어 조작 실패'); return true; }
   if (msg.type === 'bg') { run(hidden(tab, msg.action, msg.delta), '숨은 플레이어 실패'); return true; }
+  if (msg.type === 'thumb') { run(thumb(msg.url), '썸네일 읽기 실패'); return true; }
 });
 
 // 탭의 프레임을 "보이는 플레이어 쪽(fg)"과 "숨은 플레이어 쪽(bg: dgbg=1 프레임과 그 하위)"으로 나눔

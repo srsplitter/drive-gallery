@@ -574,7 +574,7 @@
 <script src="directory-thumbs.js?v=20261105-plain1"></script>
 <script src="branding.js?v=20261021-logo3"></script>
 <script src="video-merge.js?v=20261017-renum4"></script>
-<script src="intro-check.js?v=20261109-check2"></script>
+<script src="intro-check.js?v=20261110-ext1"></script>
 <script src="merge-ui.js?v=20261109-check2"></script>
 <script src="decensor-ui.js?v=20261022-lada6"></script>
 <script src="finder-ui.js?v=20261101-find5"></script>
@@ -3390,7 +3390,7 @@ window.addEventListener('message', e => {
   if (e.source !== window || !e.data || e.data.source !== 'dgallery-ext') return;
   if (e.data.type === 'ready') {
     extVersion = e.data.version || extVersion;
-    if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); syncAutoPause(); }
+    if (!extReady) { extReady = true; document.body.classList.add('has-ext'); renderEditBtn(); syncAutoPause(); IntroCheck.recheck(); }
   } else if (e.data.type === 'result') {
     const done = extWaiters.get(e.data.id);
     if (done) { extWaiters.delete(e.data.id); done(e.data); }

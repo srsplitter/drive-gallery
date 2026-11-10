@@ -20,6 +20,7 @@ const root = path.resolve(__dirname, '..');
   try {
     await page.goto('https://gallery.test/');
     await page.evaluate(async () => {
+      extReady = true; extVersion = '2.1'; extCall = async (type, { url }) => ({ ok: true, data: url }); // 확장이 드라이브 썸네일을 대신 받아 줌 (가짜)
       prefetchCandidates = () => {}; needsShare = () => false; token = 'fixture'; tokenExp = Date.now() + 3600000; flushSaves = async () => {};
       const draw = flip => { const c = document.createElement('canvas'); c.width = 160; c.height = 90; const x = c.getContext('2d');
         const g = x.createLinearGradient(0, 0, 160, 0); g.addColorStop(flip ? 1 : 0, '#000'); g.addColorStop(flip ? 0 : 1, '#fff'); x.fillStyle = g; x.fillRect(0, 0, 160, 90); return c.toDataURL('image/png'); };
@@ -61,6 +62,9 @@ const root = path.resolve(__dirname, '..');
     // 새 썸네일이 나왔는데 여전히 다르면 다시 대기열로
     await page.evaluate(() => { items.find(x => x.id === 'diff').thumbnailVersion = '2'; IntroCheck.recheck(); });
     await page.waitForFunction(() => !!document.querySelector('#regularVideos .card[data-id="diff"]'));
+    // 확장이 없으면(폰 등) 그림을 못 읽으니 비교하지 않고 '넣었음' 기록만 봄 → 넣은 영상은 빗금 없음
+    await page.evaluate(() => { extReady = false; MergeUI.toggleMode(); });
+    assert.deepEqual(await ids('#regularVideos .card.no-intro'), ['none']);
     assert.deepEqual(errors, []);
     console.log('intro-check-browser: ok');
   } finally { await browser.close(); }
