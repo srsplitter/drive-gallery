@@ -11,7 +11,7 @@ const VideoMerge = (() => {
   const even = n => Math.max(2, Math.round(n / 2) * 2);
   const RATE = 48000, CH = 2;
 
-  // parts: [{ name, size, read(start, end) → Promise<Uint8Array>, intro?: CanvasImageSource }]
+  // parts: [{ name, size, read(start, end) → Promise<Uint8Array>, intro?: CanvasImageSource, introSec?: 썸네일 길이(초, 기본 1) }]
   // writable: WritableStream<Uint8Array> (앞에서부터 차례로만 씀)
   // onProgress({ done, total, part, phase })
   async function merge({ parts, writable, onProgress = () => {}, signal }) {
@@ -52,7 +52,7 @@ const VideoMerge = (() => {
     output.addVideoTrack(vsrc);
     output.addAudioTrack(asrc);
     const canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext('2d');
-    const total = inputs.reduce((s, x) => s + x.dur + (x.p.intro ? 1 : 0), 0);
+    const total = inputs.reduce((s, x) => s + x.dur + (x.p.intro ? x.p.introSec || 1 : 0), 0);
     let offset = 0, done = 0;
     const tick = (t, part, phase) => { done = Math.max(done, t); onProgress({ done, total, part, phase }); };
 
@@ -89,14 +89,15 @@ const VideoMerge = (() => {
       await output.start();
       for (const [i, x] of inputs.entries()) {
         check();
-        if (x.p.intro) { // 썸네일 1초
+        if (x.p.intro) { // 썸네일 (기본 1초, introSec 로 바꿈)
+          const sec = x.p.introSec || 1;
           ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
           fit(ctx, x.p.intro, W, H);
-          const s = new MB.VideoSample(canvas, { timestamp: offset, duration: 1 });
+          const s = new MB.VideoSample(canvas, { timestamp: offset, duration: sec });
           await vsrc.add(s, { keyFrame: true });
           s.close();
-          await silence(offset, offset + 1);
-          offset += 1;
+          await silence(offset, offset + sec);
+          offset += sec;
           tick(offset, i, 'intro');
         }
         const base = offset - x.first, end = offset + x.dur;
