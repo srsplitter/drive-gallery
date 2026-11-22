@@ -24,10 +24,11 @@ execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsr
       const bytes = new Uint8Array(await (await fetch('/sample.mp4')).arrayBuffer());
       const c = document.createElement('canvas'); c.width = 320; c.height = 180; c.getContext('2d').fillRect(0, 0, 320, 180);
       const run = async introSec => (await VideoMerge.merge({ parts: [{ name: 's', size: bytes.length, read: async (s, e) => bytes.slice(s, e), intro: c, introSec }], writable: new WritableStream({ write() {} }) })).duration;
-      return [await run(undefined), await run(3)];
+      return [await run(undefined), await run(3), await run(d => Math.max(1, Math.ceil(d / 1000)) + 1)];
     });
     assert.ok(Math.abs(dur[0] - 5) < 0.2, 'default 1s: ' + dur);
     assert.ok(Math.abs(dur[1] - 7) < 0.2, 'introSec 3: ' + dur);
+    assert.ok(Math.abs(dur[2] - 6) < 0.2, 'introSec from length: ' + dur);
     console.log('intro-length-browser: ok', dur);
   } finally { await browser.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 })().catch(e => { console.error(e); process.exit(1); });

@@ -23,7 +23,8 @@ const MergeUI = (() => {
   let autoPicks = []; // 자동 썸네일로 고른 영상 [f] (누른 순서)
   const introMap = () => gallery.intro || (gallery.intro = {});
   // 자동 썸네일 길이: 영상 길이의 0.1% (최소 1초, 초 단위로 올림). 드라이브는 영상마다 앞 1~7초 사이 장면을 썸네일로 고름
-  const autoIntroSec = f => Math.max(1, Math.ceil((+(f.videoMediaMetadata || {}).durationMillis || 0) / 1e6));
+  // 길이는 파일에서 직접 읽음 (버전을 되돌린 영상은 드라이브가 길이 정보를 비워 둠)
+  const autoIntroSec = durSec => Math.max(1, Math.ceil(durSec / 1000));
   const hasThumb = f => { const c = gallery.videos[f.id]; return !!(c && (c.thumb || c.file)); };
   let intro = null; // 합친 영상 맨 앞 1초 장면 { img: 캔버스·이미지, url: 미리보기, key: 고른 썸네일의 영상 ID | null(가위로 찍음) }
   let nameDraft = '', nameError = ''; // nameError: 이름 칸 아래 빨간 안내
@@ -559,7 +560,8 @@ const MergeUI = (() => {
     return im;
   }
   async function runAuto(job) {
-    const { f } = job.list[0], { signal } = job.ctrl, sec = autoIntroSec(f);
+    const { f } = job.list[0], { signal } = job.ctrl;
+    let sec = '';
     job.state = 'running';
     const onWait = on => { if (on) job.show(undefined, '로그인 시간이 끝나 기다리는 중 — 위쪽 🔑 다시 로그인을 누르면 이어서 해요'); };
     job.show(0, '시작');
@@ -573,7 +575,7 @@ const MergeUI = (() => {
       // 진행률: 다시 압축 0~70%, 덮어 올리기 70~100%. 덮어쓰기는 마지막 조각이 올라가야 바뀌므로 그 전에 멈추면 원본 그대로
       const made = await withTemp('auto-' + job.id + '.mp4', async tmp => {
         await VideoMerge.merge({
-          parts: [{ name: f.name, size: +f.size, read: driveRead(f, signal, onWait), intro: img, introSec: sec }],
+          parts: [{ name: f.name, size: +f.size, read: driveRead(f, signal, onWait), intro: img, introSec: d => (sec = autoIntroSec(d)) }],
           writable: tmp.writable, signal,
           onProgress: p => { const pct = Math.min(70, 70 * p.done / p.total); job.show(pct, `${pct.toFixed(0)}% · 맨 앞 ${sec}초 썸네일 넣고 다시 압축하는 중`); },
         });

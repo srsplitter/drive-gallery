@@ -39,8 +39,9 @@ const IntroCheck = (() => {
     saveUp();
     return false;
   }
-  // 드라이브가 저장·변환 중이라 재생도 썸네일도 아직 안 되는 영상 → 자동 썸네일 대기열에서 뺌
-  const processing = f => !f.thumbnailLink || !(f.videoMediaMetadata && +f.videoMediaMetadata.durationMillis) || justUploaded(f);
+  // 드라이브가 저장·변환 중이라 썸네일이 아직 없는 영상 → 자동 썸네일 대기열에서 뺌
+  // (길이 정보는 보지 않음: 버전을 되돌린 영상은 썸네일이 있어도 드라이브가 길이 정보를 비워 둠)
+  const processing = f => !f.thumbnailLink || justUploaded(f);
 
   const image = (src, cors) => new Promise((ok, bad) => {
     const im = new Image();

@@ -52,8 +52,9 @@ const root = path.resolve(__dirname, '..');
     const inQueue = id => page.evaluate(id => !!document.querySelector(`#regularVideos .card[data-id="${id}"]`), id);
     await page.evaluate(() => { const f = items.find(x => x.id === 'none'); window.link = f.thumbnailLink; f.thumbnailLink = ''; IntroCheck.recheck(); });
     await page.waitForFunction(() => !document.querySelector('#regularVideos .card[data-id="none"]'));
+    // 길이 정보가 없어도(버전을 되돌린 영상) 썸네일이 있으면 대기열에 남음
     await page.evaluate(() => { const f = items.find(x => x.id === 'none'); f.thumbnailLink = window.link; f.videoMediaMetadata = {}; renderGrid(); });
-    assert.equal(await inQueue('none'), false);
+    assert.equal(await inQueue('none'), true);
     await page.evaluate(() => { const f = items.find(x => x.id === 'none'); f.videoMediaMetadata = { durationMillis: '10000' }; IntroCheck.recheck(); });
     await page.waitForFunction(() => !!document.querySelector('#regularVideos .card[data-id="none"]'));
     await page.evaluate(() => { IntroCheck.uploaded(items.find(x => x.id === 'diff')); renderGrid(); });
