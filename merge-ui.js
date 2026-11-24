@@ -474,13 +474,14 @@ const MergeUI = (() => {
     try {
       const first = list[0].f;
       // 임시 저장공간이 넉넉한지 (합친 영상은 대략 원본 합보다 조금 클 수 있음)
-      const need = list.reduce((s, p) => s + +p.f.size, 0) * 1.3;
-      const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
-      if (est && est.quota - est.usage < need) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(need / 1e9).toFixed(1)}GB)`);
       const made = await withTemp('merge-' + job.id + '.mp4', async tmp => {
         await VideoMerge.merge({
           parts: list.map((p, i) => ({ name: p.f.name, size: +p.f.size, read: driveRead(p.f, ctrl.signal), intro: i === 0 && job.intro ? job.intro.img : null })),
-          writable: tmp.writable, signal: ctrl.signal, onProgress: p => { prog = p; show(); },
+          writable: tmp.writable, signal: ctrl.signal,
+          onPlan: async ({ bytes }) => {
+            const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
+            if (est && est.quota - est.usage < bytes) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(bytes / 1e9).toFixed(1)}GB, 남은 공간 약 ${((est.quota - est.usage) / 1e9).toFixed(1)}GB)`);
+          }, onProgress: p => { prog = p; show(); },
         });
         const blob = await tmp.file();
         upTotal = blob.size;
@@ -569,14 +570,15 @@ const MergeUI = (() => {
     try {
       if (!hasThumb(f)) throw new Error('지정 썸네일이 없어요');
       const img = await thumbImage(f);
-      const need = +f.size * 1.3;
-      const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
-      if (est && est.quota - est.usage < need) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(need / 1e9).toFixed(1)}GB)`);
       // 진행률: 다시 압축 0~70%, 덮어 올리기 70~100%. 덮어쓰기는 마지막 조각이 올라가야 바뀌므로 그 전에 멈추면 원본 그대로
       const made = await withTemp('auto-' + job.id + '.mp4', async tmp => {
         await VideoMerge.merge({
           parts: [{ name: f.name, size: +f.size, read: driveRead(f, signal, onWait), intro: img, introSec: d => (sec = autoIntroSec(d)) }],
           writable: tmp.writable, signal,
+          onPlan: async ({ bytes }) => {
+            const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
+            if (est && est.quota - est.usage < bytes) throw new Error(`PC 의 브라우저 임시 공간이 부족해요 (필요 약 ${(bytes / 1e9).toFixed(1)}GB, 남은 공간 약 ${((est.quota - est.usage) / 1e9).toFixed(1)}GB)`);
+          },
           onProgress: p => { const pct = Math.min(70, 70 * p.done / p.total); job.show(pct, `${pct.toFixed(0)}% · 맨 앞 ${sec}초 썸네일 넣고 다시 압축하는 중`); },
         });
         const blob = await tmp.file();

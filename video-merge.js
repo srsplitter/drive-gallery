@@ -14,7 +14,8 @@ const VideoMerge = (() => {
   // parts: [{ name, size, read(start, end) → Promise<Uint8Array>, intro?: CanvasImageSource, introSec?: 썸네일 길이(초, 기본 1) 또는 (영상 길이 → 초) 함수 }]
   // writable: WritableStream<Uint8Array> (앞에서부터 차례로만 씀)
   // onProgress({ done, total, part, phase })
-  async function merge({ parts, writable, onProgress = () => {}, signal }) {
+  // onPlan({ bytes }): 다시 압축하기 전에 결과 크기 어림값을 알려 줌 (임시 공간이 모자라면 여기서 throw 해서 멈춤)
+  async function merge({ parts, writable, onProgress = () => {}, onPlan, signal }) {
     const MB = await load();
     const check = () => { if (signal && signal.aborted) throw new DOMException('취소했어요', 'AbortError'); };
 
@@ -30,17 +31,38 @@ const VideoMerge = (() => {
       let a = await input.getPrimaryAudioTrack();
       if (a && !await a.canDecode()) a = null; // 못 푸는 소리는 무음으로
       const first = await input.getFirstTimestamp();
-      const dur = (await input.computeDuration()) - first;
+      let dur = (await input.computeDuration()) - first;
+      // 장면 절반쯤에 엉뚱하게 큰 시각(예: 134초 영상에 143165초)이 찍힌 영상: 음수인 표시 시각 차이를 부호 없는 32비트로 저장해
+      // 2^32 ÷ 시간 단위만큼 밀린 것 → 그만큼 되돌려 씀 (소리보다 훨씬 길게 나올 때만)
+      let wrap = 0;
+      if (a) {
+        const ad = (await a.computeDuration()) - first;
+        if (dur > ad * 1.5 + 10) {
+          wrap = 2 ** 32 / v.timeResolution;
+          dur = await unwrappedEnd(MB, v, wrap) - first;
+          if (dur > ad * 1.5 + 10) throw new Error(`"${p.name}" 은(는) 장면 시각이 깨져 있어 다시 압축할 수 없어요.`);
+        }
+      }
       const introLen = !p.intro ? 0 : typeof p.introSec === 'function' ? p.introSec(dur) : p.introSec || 1;
-      inputs.push({ p, input, v, a, first, dur, introLen });
+      inputs.push({ p, input, v, a, first, dur, introLen, wrap });
     }
 
     // 2) 출력 설정: 첫 영상 크기, 원본과 비슷한 비트레이트
-    const W = even(await inputs[0].v.getDisplayWidth()), H = even(await inputs[0].v.getDisplayHeight());
+    let W = even(await inputs[0].v.getDisplayWidth()), H = even(await inputs[0].v.getDisplayHeight());
     const firstRate = inputs[0].p.size * 8 / Math.max(1, inputs[0].dur);
     const bitrate = Math.round(Math.min(Math.max(firstRate * 0.95, 2e6), 40e6));
-    if (!await MB.canEncodeVideo('avc', { width: W, height: H, bitrate }))
-      throw new Error(`이 PC 에서는 ${W}×${H} H.264 로 다시 압축할 수 없어요.`);
+    // H.264 로 못 만드는 큰 화면(예: 5120×2160)은 비율 그대로 줄여서 만들 수 있는 크기로
+    if (!await MB.canEncodeVideo('avc', { width: W, height: H, bitrate })) {
+      let fit = null;
+      for (const side of [4096, 3840, 2560, 1920, 1280]) {
+        const k = side / Math.max(W, H);
+        if (k >= 1) continue;
+        const w = even(W * k), h = even(H * k);
+        if (await MB.canEncodeVideo('avc', { width: w, height: h, bitrate })) { fit = [w, h]; break; }
+      }
+      if (!fit) throw new Error(`이 PC 에서는 ${W}×${H} H.264 로 다시 압축할 수 없어요.`);
+      [W, H] = fit;
+    }
     const acodec = await MB.canEncodeAudio('aac', { numberOfChannels: CH, sampleRate: RATE, bitrate: 192e3 }) ? 'aac' : 'opus';
     // 표준 MP4(색인 moov 은 끝에). 조각 MP4(fragmented)는 아이폰이 앞 몇 조각만 보고 길이를 잘못 아는 일이 있어 쓰지 않음.
     // writable 은 { data, position } 을 받아 그 위치에 씀(파일 앞부분 길이 칸을 마지막에 다시 씀)
@@ -54,6 +76,7 @@ const VideoMerge = (() => {
     output.addAudioTrack(asrc);
     const canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext('2d');
     const total = inputs.reduce((s, x) => s + x.dur + x.introLen, 0);
+    if (onPlan) await onPlan({ bytes: Math.round((bitrate + 192e3) / 8 * total * 1.03) + 64e6, width: W, height: H });
     let offset = 0, done = 0;
     const tick = (t, part, phase) => { done = Math.max(done, t); onProgress({ done, total, part, phase }); };
 
@@ -103,22 +126,41 @@ const VideoMerge = (() => {
         }
         const base = offset - x.first, end = offset + x.dur;
         let keyNext = true; // 영상이 바뀌는 첫 장면은 키프레임
+        let srcAt = 0; // 마지막으로 푼 원본 시각 (깨진 파일 안내용)
+        const put = async sample => {
+          try {
+            check();
+            srcAt = sample.timestamp;
+            const t = sample.timestamp + base;
+            if (t < offset - 1e-3 || t >= end) return; // 편집 목록으로 앞뒤에 잘린 장면
+            ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+            sample.drawWithFit(ctx, { fit: 'contain' });
+            const out = new MB.VideoSample(canvas, { timestamp: t, duration: sample.duration || 1 / 30 });
+            await vsrc.add(out, keyNext ? { keyFrame: true } : undefined);
+            keyNext = false;
+            out.close();
+            tick(t, i, 'video');
+          } finally { sample.close(); }
+        };
         const videoLoop = (async () => {
-          for await (const sample of new MB.VideoSampleSink(x.v).samples()) {
-            try {
-              check();
-              const t = sample.timestamp + base;
-              if (t < offset - 1e-3 || t >= end) continue; // 편집 목록으로 앞뒤에 잘린 장면
-              ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-              sample.drawWithFit(ctx, { fit: 'contain' });
-              const out = new MB.VideoSample(canvas, { timestamp: t, duration: sample.duration || 1 / 30 });
-              await vsrc.add(out, keyNext ? { keyFrame: true } : undefined);
-              keyNext = false;
-              out.close();
-              tick(t, i, 'video');
-            } finally { sample.close(); }
+          let resume = null;
+          try {
+            for await (const sample of (x.wrap ? robustSamples(MB, x.v, x.wrap) : new MB.VideoSampleSink(x.v).samples())) await put(sample);
+          } catch (e) {
+            // 중간 몇 초가 깨진 영상(크롬 <video> 는 깨진 장면만 건너뛰고 재생됨): 거기서부터는 직접 풀면서 깨진 구간을 건너뜀
+            if (!e || e.name === 'AbortError' || !/decod/i.test(e.message || '')) throw e;
+            resume = srcAt;
           }
-        })();
+          if (resume !== null)
+            for await (const sample of robustSamples(MB, x.v, x.wrap, resume)) {
+              if (sample.timestamp <= resume + 1e-6) { sample.close(); continue; }
+              await put(sample);
+            }
+        })().catch(e => {
+          // 파일 중간부터 영상 데이터가 아닌 것이 들어 있는 등 깨진 파일: 크롬 해독기가 "Decoder/Decoding error" 를 냄
+          if (e && e.name !== 'AbortError' && /decod/i.test(e.message || '')) throw new Error(`"${x.p.name}" 은(는) ${Math.floor(srcAt)}초쯤부터 파일이 깨져 있어 다시 압축할 수 없어요 (원본 파일을 다시 올려야 해요).`);
+          throw e;
+        });
         const audioLoop = (async () => {
           let at = offset; // 여기까지 소리를 채움
           if (x.a) {
@@ -164,6 +206,67 @@ const VideoMerge = (() => {
       for (const x of inputs) try { x.input.dispose && x.input.dispose(); } catch {}
     }
     return { width: W, height: H, duration: offset, audioCodec: acodec };
+  }
+
+  // 밀린 시각을 되돌린 뒤의 영상 끝 (색인만 훑음)
+  async function unwrappedEnd(MB, v, wrap) {
+    let end = 0;
+    for await (const p of new MB.EncodedPacketSink(v).packets(undefined, undefined, { metadataOnly: true }))
+      end = Math.max(end, (p.timestamp > wrap / 2 ? p.timestamp - wrap : p.timestamp) + (p.duration || 0));
+    return end;
+  }
+  // 직접 풂: 패킷을 해독 순서대로 넣으면 해독기가 장면을 표시 순서로 내놓음.
+  // - wrap: 밀린 시각을 되돌림 (Mediabunny 의 장면 꺼내기는 깨진 시각 그대로 순서를 정해 밀린 장면들이 맨 뒤로 몰림)
+  // - 깨진 패킷(H.264 길이 표시가 안 맞음)이나 해독 실패가 나오면 다음 멀쩡한 키프레임까지 건너뛰고 해독기를 새로 만듦
+  // - from: 이 시각 근처부터 시작 (앞에서 해독이 멈춘 곳)
+  async function* robustSamples(MB, v, wrap, from) {
+    const norm = t => wrap && t > wrap / 2 ? t - wrap : t;
+    const config = await v.getDecoderConfig();
+    const desc = config.description;
+    const db = !desc ? null : desc instanceof ArrayBuffer ? new Uint8Array(desc) : new Uint8Array(desc.buffer, desc.byteOffset, desc.byteLength);
+    const lenSize = /^avc[13]/.test(config.codec) && db && db.length > 4 ? (db[4] & 3) + 1 : 0;
+    const wellFormed = d => {
+      if (!lenSize) return true;
+      let i = 0;
+      while (i < d.length) {
+        if (i + lenSize > d.length) return false;
+        let n = 0;
+        for (let k = 0; k < lenSize; k++) n = n * 256 + d[i + k];
+        if (!n) return false;
+        i += lenSize + n;
+      }
+      return i === d.length;
+    };
+    const ready = [];
+    let dec = null, broken = false, needKey = true;
+    const open = () => {
+      broken = false;
+      dec = new VideoDecoder({ output: f => ready.push(f), error: () => { broken = true; } });
+      dec.configure(config);
+    };
+    const reset = () => { try { dec.close(); } catch {} open(); needKey = true; };
+    open();
+    const sink = new MB.EncodedPacketSink(v);
+    const start = from == null ? undefined : (await sink.getPacket(from)) || undefined;
+    try {
+      for await (const p of sink.packets(start)) {
+        if (broken) reset();
+        if (!wellFormed(p.data)) { needKey = true; continue; } // 깨진 패킷: 다음 키프레임까지 버림
+        if (needKey && p.type !== 'key') continue;
+        if (needKey && dec.decodeQueueSize) reset();
+        needKey = false;
+        try {
+          dec.decode(new EncodedVideoChunk({ type: p.type, timestamp: Math.round(norm(p.timestamp) * 1e6), duration: Math.round((p.duration || 0) * 1e6), data: p.data }));
+        } catch { broken = true; continue; }
+        while (dec.decodeQueueSize > 4 && !broken) await new Promise(r => setTimeout(r, 2));
+        while (ready.length) yield new MB.VideoSample(ready.shift());
+      }
+      if (!broken) await dec.flush().catch(() => {});
+      while (ready.length) yield new MB.VideoSample(ready.shift());
+    } finally {
+      for (const f of ready) f.close();
+      try { dec.close(); } catch {}
+    }
   }
 
   // 이미지·캔버스를 비율 그대로 가운데에 (contain)
