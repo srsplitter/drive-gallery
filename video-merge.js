@@ -135,7 +135,7 @@ const VideoMerge = (() => {
             if (t < offset - 1e-3 || t >= end) return; // 편집 목록으로 앞뒤에 잘린 장면
             ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
             sample.drawWithFit(ctx, { fit: 'contain' });
-            const out = new MB.VideoSample(canvas, { timestamp: t, duration: sample.duration || 1 / 30 });
+            const out = new MB.VideoSample(canvas, { timestamp: t, duration: sane(sample.duration) || 1 / 30 });
             await vsrc.add(out, keyNext ? { keyFrame: true } : undefined);
             keyNext = false;
             out.close();
@@ -178,14 +178,29 @@ const VideoMerge = (() => {
               at = Math.max(at, pendingStart + buf.duration);
               pending = []; pendingStart = null; pendingLen = 0;
             };
-            for await (const { buffer, timestamp } of new MB.AudioBufferSink(x.a).buffers()) {
-              check();
-              const t = timestamp + base;
-              if (t + buffer.duration <= offset || t >= end) continue;
-              if (pendingStart === null) pendingStart = t;
-              pending.push(buffer);
-              pendingLen += buffer.duration;
-              if (pendingLen >= 5) await flush();
+            // 소리 데이터가 깨진 구간(영상과 같은 곳)에서 해독이 멈추면 0.5초씩 뒤에서 다시 시작 (빈 곳은 무음으로 채워짐)
+            let from, srcA = null, taken = -Infinity; // taken: 이미 받은 소리의 끝 (다시 시작할 때 겹치는 조각은 버림)
+            for (let tries = 0; ; tries++) {
+              try {
+                for await (const { buffer, timestamp } of new MB.AudioBufferSink(x.a).buffers(from)) {
+                  check();
+                  srcA = timestamp;
+                  const t = timestamp + base;
+                  if (t + buffer.duration <= offset || t >= end || t < taken - 1e-3) continue;
+                  taken = t + buffer.duration;
+                  if (pendingStart !== null && t > pendingStart + pendingLen + 1e-3) await flush(); // 건너뛴 곳 앞까지 먼저 씀
+                  if (pendingStart === null) pendingStart = t;
+                  pending.push(buffer);
+                  pendingLen += buffer.duration;
+                  if (pendingLen >= 5) await flush();
+                }
+                break;
+              } catch (e) {
+                if (!e || e.name === 'AbortError' || !/decod/i.test(e.message || '') || tries > 5000) throw e;
+                from = Math.max(srcA ?? x.first, (from ?? x.first)) + 0.5;
+                srcA = from;
+                if (from + base >= end) break;
+              }
             }
             await flush();
           }
@@ -208,11 +223,13 @@ const VideoMerge = (() => {
     return { width: W, height: H, duration: offset, audioCodec: acodec };
   }
 
+  // 장면 길이: 시각이 밀린 영상은 밀린 장면 바로 앞 장면 길이가 14만 초처럼 나옴 → 10초 넘으면 버림
+  const sane = d => d > 0 && d < 10 ? d : 0;
   // 밀린 시각을 되돌린 뒤의 영상 끝 (색인만 훑음)
   async function unwrappedEnd(MB, v, wrap) {
     let end = 0;
     for await (const p of new MB.EncodedPacketSink(v).packets(undefined, undefined, { metadataOnly: true }))
-      end = Math.max(end, (p.timestamp > wrap / 2 ? p.timestamp - wrap : p.timestamp) + (p.duration || 0));
+      end = Math.max(end, (p.timestamp > wrap / 2 ? p.timestamp - wrap : p.timestamp) + sane(p.duration));
     return end;
   }
   // 직접 풂: 패킷을 해독 순서대로 넣으면 해독기가 장면을 표시 순서로 내놓음.
@@ -256,7 +273,7 @@ const VideoMerge = (() => {
         if (needKey && dec.decodeQueueSize) reset();
         needKey = false;
         try {
-          dec.decode(new EncodedVideoChunk({ type: p.type, timestamp: Math.round(norm(p.timestamp) * 1e6), duration: Math.round((p.duration || 0) * 1e6), data: p.data }));
+          dec.decode(new EncodedVideoChunk({ type: p.type, timestamp: Math.round(norm(p.timestamp) * 1e6), duration: Math.round(sane(p.duration) * 1e6), data: p.data }));
         } catch { broken = true; continue; }
         while (dec.decodeQueueSize > 4 && !broken) await new Promise(r => setTimeout(r, 2));
         while (ready.length) yield new MB.VideoSample(ready.shift());
